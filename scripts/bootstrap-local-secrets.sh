@@ -31,7 +31,7 @@ mkdir -p "${DEST}/tls"
 grafana_password="$(openssl rand -base64 24 | tr -d '\n')"
 nginx_password="$(openssl rand -base64 24 | tr -d '\n')"
 salt="$(openssl rand -hex 4 | tr -d '\n')"
-htpasswd_hash="$(printf '%s' "${nginx_password}" | openssl passwd -apr1 -salt "${salt}" -stdin)"
+htpasswd_hash="$(printf '%s' "${nginx_password}" | openssl passwd -6 -salt "${salt}" -stdin)"
 
 printf '%s\n' "${grafana_password}" > "${DEST}/grafana_admin_password"
 printf '%s\n' "${nginx_password}" > "${DEST}/nginx_basic_auth_password"

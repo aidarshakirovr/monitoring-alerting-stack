@@ -42,12 +42,15 @@
     - monitoring-docker-user.service
     - monitoring-docker-user.timer
 
-- name: Включить таймер DOCKER-USER
+- name: Включить правила вместе с Docker и по таймеру
   ansible.builtin.systemd:
-    name: monitoring-docker-user.timer
+    name: "{{ item }}"
     enabled: true
     state: started
     daemon_reload: true
+  loop:
+    - monitoring-docker-user.service
+    - monitoring-docker-user.timer
   when: not ansible_check_mode
 
 - name: Разрешить порты прокси в UFW только с указанных сетей

@@ -10,4 +10,4 @@ mkdir -p \
   /var/cache/nginx/uwsgi_temp \
   /var/cache/nginx/scgi_temp \
   /var/run
-exec nginx -g 'daemon off;'
+exec nginx -c /etc/monitoring-nginx/nginx.conf -g 'daemon off;'

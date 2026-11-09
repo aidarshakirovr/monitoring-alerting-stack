@@ -23,6 +23,11 @@ monitoring_restic_repository: /var/backups/restic-repo
 monitoring_restic_password_file: /etc/restic/backup.pass
 monitoring_restic_cache_dir: /var/cache/restic-backup
 monitoring_restic_repo_label: primary
+# Пустой host — не фильтровать. Путь по умолчанию совпадает с /srv/app/data
+# из репозитория backup. Несколько групп без фильтра прячут старый бэкап
+# за свежим: задайте путь явно.
+monitoring_restic_snapshot_host: ""
+monitoring_restic_snapshot_paths: "/srv/app/data"
 
 # 900 секунд = 15 минут, то же окно, что в комментарии к порогу SSH-алерта.
 monitoring_ssh_window_seconds: 900
@@ -41,4 +46,5 @@ monitoring_http_targets:
 monitoring_tls_targets:
   - example.invalid:443
 
-monitoring_prometheus_image: prom/prometheus:v3.16.0
+monitoring_prometheus_image: prom/prometheus:v3.16.0@sha256:e04987641b57704f408e31f6373ba4138ecf27cb4a165d24aabb6c38fddd0f06
+monitoring_alertmanager_gid: "65534"

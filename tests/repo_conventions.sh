@@ -27,6 +27,16 @@ done
 grep -q 'prom/prometheus:v3.16.0' scripts/check-monitoring-config.sh
 grep -q 'prom/alertmanager:v0.34.2' scripts/check-monitoring-config.sh
 grep -q 'prom/blackbox-exporter:v0.29.1' scripts/check-monitoring-config.sh
+image_lines="$(grep -cE '^[[:space:]]*image:' docker/compose.yaml)"
+digest_lines="$(grep -cE '^[[:space:]]*image:.*@sha256:[0-9a-f]{64}' docker/compose.yaml)"
+[[ "${image_lines}" == "${digest_lines}" ]] || {
+  echo "[FAIL] не у каждого image есть digest (${digest_lines}/${image_lines})" >&2
+  exit 1
+}
+grep -q 'proxy_set_header Authorization ""' monitoring/nginx/conf.d/default.conf
+grep -q -- '--no-lock' scripts/restic-textfile.sh
+grep -q 'sshd-session' scripts/ssh-auth-metrics.sh
+grep -q 'ctorigdstport' scripts/monitoring-docker-user.sh
 
 echo "== actions закреплены SHA =="
 if grep -n 'uses:' .github/workflows/validate.yml | grep -v -E '@[0-9a-f]{40}'; then

@@ -51,18 +51,18 @@ receivers:
   - name: watchdog
 {% if vault_watchdog_webhook_url | default('') | length > 0 and 'REPLACE_ME' not in vault_watchdog_webhook_url %}
     webhook_configs:
-      - url: {{ vault_watchdog_webhook_url | to_json }}
+      - url_file: /etc/alertmanager/webhook-watchdog.url
         send_resolved: false
 {% endif %}
   - name: critical
 {% if vault_alertmanager_webhook_url | default('') | length > 0 and 'REPLACE_ME' not in vault_alertmanager_webhook_url %}
     webhook_configs:
-      - url: {{ vault_alertmanager_webhook_url | to_json }}
+      - url_file: /etc/alertmanager/webhook-alert.url
         send_resolved: true
 {% endif %}
   - name: warning
 {% if vault_alertmanager_webhook_url | default('') | length > 0 and 'REPLACE_ME' not in vault_alertmanager_webhook_url %}
     webhook_configs:
-      - url: {{ vault_alertmanager_webhook_url | to_json }}
+      - url_file: /etc/alertmanager/webhook-alert.url
         send_resolved: true
 {% endif %}

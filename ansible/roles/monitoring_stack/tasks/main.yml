@@ -9,19 +9,38 @@
   loop:
     - path: "{{ monitoring_install_root }}/monitoring"
       mode: "0755"
+    - path: "{{ monitoring_install_root }}/monitoring/prometheus/file_sd"
+      mode: "0755"
+    - path: "{{ monitoring_install_root }}/monitoring/alertmanager"
+      mode: "0755"
+    - path: "{{ monitoring_install_root }}/docker/secrets"
+      mode: "0750"
+      group: "{{ monitoring_proxy_gid }}"
     - path: "{{ monitoring_install_root }}/docker/secrets/tls"
       mode: "0750"
       group: "{{ monitoring_proxy_gid }}"
   loop_control:
     label: "{{ item.path }}"
 
-- name: Скопировать конфигурацию monitoring
+- name: Скопировать неизменяемые каталоги стека
   ansible.builtin.copy:
-    src: "{{ playbook_dir }}/../monitoring/"
-    dest: "{{ monitoring_install_root }}/monitoring/"
+    src: "{{ playbook_dir }}/../{{ item.src }}"
+    dest: "{{ monitoring_install_root }}/{{ item.dest }}"
     owner: root
     group: root
     mode: preserve
+  loop:
+    - src: monitoring/prometheus/rules
+      dest: monitoring/prometheus/rules
+    - src: monitoring/grafana
+      dest: monitoring/grafana
+    - src: monitoring/blackbox
+      dest: monitoring/blackbox
+    - src: monitoring/nginx
+      dest: monitoring/nginx
+  loop_control:
+    label: "{{ item.dest }}"
+  notify: Перечитать конфигурацию стека
 
 - name: Скопировать compose-файл
   ansible.builtin.copy:
@@ -30,6 +49,29 @@
     owner: root
     group: root
     mode: "0644"
+  notify: Перечитать конфигурацию стека
+
+- name: В production нужны получатели алертов
+  ansible.builtin.assert:
+    that:
+      - (vault_alertmanager_webhook_url | default('')) | length > 0
+      - "'REPLACE_ME' not in (vault_alertmanager_webhook_url | default(''))"
+      - (vault_watchdog_webhook_url | default('')) | length > 0
+      - "'REPLACE_ME' not in (vault_watchdog_webhook_url | default(''))"
+    fail_msg: >-
+      env=production требует vault_alertmanager_webhook_url и
+      vault_watchdog_webhook_url. Пустой receiver молча съедает алерты,
+      а Watchdog без внешнего получателя не сторожит смерть Prometheus.
+  when: (env | default('example')) == 'production'
+
+- name: Записать prometheus.yml
+  ansible.builtin.template:
+    src: prometheus.yml.j2
+    dest: "{{ monitoring_install_root }}/monitoring/prometheus/prometheus.yml"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Перечитать конфигурацию стека
 
 - name: Записать file_sd целей HTTP
   ansible.builtin.template:
@@ -38,6 +80,7 @@
     owner: root
     group: root
     mode: "0644"
+  notify: Перечитать конфигурацию стека
 
 - name: Записать file_sd целей TLS
   ansible.builtin.template:
@@ -46,21 +89,17 @@
     owner: root
     group: root
     mode: "0644"
-
-- name: Проставить external label env
-  ansible.builtin.replace:
-    path: "{{ monitoring_install_root }}/monitoring/prometheus/prometheus.yml"
-    regexp: '^(\s*)env:\s+example\s*$'
-    replace: '\1env: {{ env | default("example") }}'
+  notify: Перечитать конфигурацию стека
 
 - name: Записать конфигурацию Alertmanager
   ansible.builtin.template:
     src: alertmanager.yml.j2
     dest: "{{ monitoring_install_root }}/monitoring/alertmanager/alertmanager.yml"
     owner: root
-    group: root
-    mode: "0644"
+    group: "{{ monitoring_alertmanager_gid }}"
+    mode: "0640"
   no_log: true
+  notify: Перечитать конфигурацию стека
 
 - name: Сгенерировать секреты и запустить compose
   when: not ansible_check_mode
@@ -135,6 +174,7 @@
         group: root
         mode: "0600"
       no_log: true
+      notify: Сбросить пароль администратора Grafana
 
     - name: Выбрать пароль basic auth
       ansible.builtin.set_fact:
@@ -210,12 +250,12 @@
         mode: "0600"
       no_log: true
 
-    - name: Посчитать apr1-хеш basic auth
+    - name: Посчитать sha512-хеш basic auth
       ansible.builtin.command:
         argv:
           - openssl
           - passwd
-          - -apr1
+          - -6
           - -salt
           - "{{ monitoring_stack_htpasswd_salt }}"
           - -stdin
@@ -232,6 +272,45 @@
         group: "{{ monitoring_proxy_gid }}"
         mode: "0640"
       no_log: true
+      notify: Перечитать конфигурацию стека
+
+    - name: Удалить файл webhook алертов, если URL пуст
+      ansible.builtin.file:
+        path: "{{ monitoring_install_root }}/monitoring/alertmanager/webhook-alert.url"
+        state: absent
+      when: (vault_alertmanager_webhook_url | default('')) | length == 0
+
+    - name: Удалить файл webhook Watchdog, если URL пуст
+      ansible.builtin.file:
+        path: "{{ monitoring_install_root }}/monitoring/alertmanager/webhook-watchdog.url"
+        state: absent
+      when: (vault_watchdog_webhook_url | default('')) | length == 0
+
+    - name: Записать URL webhook Alertmanager
+      ansible.builtin.copy:
+        dest: "{{ monitoring_install_root }}/monitoring/alertmanager/webhook-alert.url"
+        content: "{{ vault_alertmanager_webhook_url }}\n"
+        owner: root
+        group: "{{ monitoring_alertmanager_gid }}"
+        mode: "0640"
+      no_log: true
+      when:
+        - (vault_alertmanager_webhook_url | default('')) | length > 0
+        - "'REPLACE_ME' not in vault_alertmanager_webhook_url"
+      notify: Перечитать конфигурацию стека
+
+    - name: Записать URL webhook Watchdog
+      ansible.builtin.copy:
+        dest: "{{ monitoring_install_root }}/monitoring/alertmanager/webhook-watchdog.url"
+        content: "{{ vault_watchdog_webhook_url }}\n"
+        owner: root
+        group: "{{ monitoring_alertmanager_gid }}"
+        mode: "0640"
+      no_log: true
+      when:
+        - (vault_watchdog_webhook_url | default('')) | length > 0
+        - "'REPLACE_ME' not in vault_watchdog_webhook_url"
+      notify: Перечитать конфигурацию стека
 
     - name: Выпустить сертификат прокси, если его ещё нет
       ansible.builtin.command:
@@ -256,6 +335,7 @@
           - subjectAltName=DNS:monitoring.example,DNS:localhost,IP:127.0.0.1
         creates: "{{ monitoring_install_root }}/docker/secrets/tls/server.crt"
       no_log: true
+      notify: Перечитать конфигурацию стека
 
     - name: Выставить права ключа и сертификата
       ansible.builtin.file:

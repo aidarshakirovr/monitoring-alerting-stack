@@ -15,7 +15,7 @@
     state: directory
     owner: root
     group: monitoring-textfile
-    mode: "2775"
+    mode: "3775"
 
 - name: Создать каталог скриптов
   ansible.builtin.file:
@@ -73,31 +73,32 @@
     daemon_reload: true
   when: not ansible_check_mode
 
-- name: Проверить пользователя restic
-  ansible.builtin.getent:
-    database: passwd
-    key: "{{ monitoring_restic_user }}"
+- name: Проверить, что пользователь restic уже есть
+  ansible.builtin.command:
+    argv: [getent, passwd, "{{ monitoring_restic_user }}"]
   register: monitoring_textfile_restic_passwd
+  changed_when: false
   failed_when: false
 
 - name: Сообщить, что таймер restic не включён
   ansible.builtin.debug:
     msg: >-
       Пользователь {{ monitoring_restic_user }} не найден.
-      Таймер restic-textfile не включён. Пока нет файла метрик,
-      будет алерт ResticMetricsAbsent. Пользователя создаёт роль
-      backup_restic в репозитории test-task-sys-admin-infr-engineer,
-      либо задайте monitoring_restic_user.
-  when: monitoring_textfile_restic_passwd is failed
+      Таймер restic-textfile не включён, учётка не создаётся.
+      Пока нет файла метрик, будет алерт ResticMetricsAbsent.
+      Пользователя создаёт роль backup_restic в репозитории
+      test-task-sys-admin-infr-engineer, либо задайте monitoring_restic_user.
+  when: monitoring_textfile_restic_passwd.rc != 0
 
 - name: Подготовить таймер restic
-  when: monitoring_textfile_restic_passwd is succeeded
+  when: monitoring_textfile_restic_passwd.rc == 0
   block:
-    - name: Добавить пользователя restic в группу textfile
+    - name: Добавить существующего пользователя restic в группу textfile
       ansible.builtin.user:
         name: "{{ monitoring_restic_user }}"
         groups: monitoring-textfile
         append: true
+        create_home: false
 
     - name: Создать кэш restic для чтения снапшотов
       ansible.builtin.file:

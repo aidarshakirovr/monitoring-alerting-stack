@@ -290,10 +290,32 @@ sudo tail -n 200 /var/log/auth.log
 
 **Не делать.** Не выключать textfile collector: вместе с ним пропадут restic и SSH.
 
+<a id="monitoringdockerusernotapplied"></a>
+## MonitoringDockerUserNotApplied
+
+**Что значит.** `monitoring_docker_user_applied{family="ipv4"}` равен 0 дольше 10 минут. Скрипт не записал правила DOCKER-USER/INPUT: нет цепочки, `MONITORING_BIND_IP=0.0.0.0`, нет iptables. Пока так, опубликованный порт не ограничен этими правилами. Bind на `127.0.0.1` сам по себе снаружи всё ещё закрыт.
+
+**Как проверить.** `systemctl status monitoring-docker-user.service`, `journalctl -u monitoring-docker-user.service -n 40`. `sudo iptables -S DOCKER-USER` и `sudo iptables -S INPUT | grep mon-`.
+
+**Как исправить.** Поднять Docker, поставить конкретный `MONITORING_BIND_IP`, перезапустить юнит. Не ставить `0.0.0.0`.
+
+**Не делать.** `iptables -F DOCKER-USER` и `iptables -F INPUT`.
+
+<a id="monitoringdockeruserstale"></a>
+## MonitoringDockerUserStale
+
+**Что значит.** Файл `docker_user.prom` старше 15 минут при таймере в 5. Скрипт не запускается, и неизвестно, на месте ли правила.
+
+**Как проверить.** `systemctl status monitoring-docker-user.timer`, `stat /var/lib/node_exporter/textfile/docker_user.prom`.
+
+**Как исправить.** Запустить сервис вручную и прочитать ошибку. После `systemctl restart docker` юнит должен прийти следом (`PartOf=`). Если не пришёл — `systemctl enable --now monitoring-docker-user.service`.
+
+**Не делать.** Не обновлять mtime через `touch`.
+
 <a id="watchdog"></a>
 ## Watchdog
 
-**Что значит.** `vector(1)` без `for`. Алерт должен гореть всегда. Severity `none`, маршрут ведёт в receiver `watchdog`. Пока webhook пустой, он никого не зовёт. Это проверка, что правила загружены. Если алерт пропал из UI Prometheus — сломаны правила, Prometheus или вы смотрите не тот экземпляр.
+**Что значит.** `vector(1)` без `for`. Алерт должен гореть всегда. Severity `none`, маршрут ведёт в receiver `watchdog`. Без `vault_watchdog_webhook_url` он виден только в UI и не доказывает, что дежурный узнает о смерти Prometheus. На `env=production` роль не стартует, пока этот URL и `vault_alertmanager_webhook_url` пустые. Приёмник — любой ping-сервис, который орёт, когда пинги прекратились (совместимый с healthchecks). URL в git не класть.
 
 **Как проверить.** `docker exec monitoring-prometheus wget -qO- http://127.0.0.1:9090/api/v1/rules | head`. Статус контейнера. Не путать с «Alertmanager молчит»: при пустом receiver страница и не должна прийти.
 

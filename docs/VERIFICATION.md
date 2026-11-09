@@ -12,7 +12,8 @@
 | Scrape | Все job в Prometheus `up`. `probe_success` внутренних health — 1. `https://example.invalid/health` и `example.invalid:443` — 0 |
 | node_exporter | С хоста видны ФС `ext4` на `/` и `/var/lib/docker`. Служебный FUSE в выгрузку не попал после исключения `fuse.*` |
 | `for:` живых алертов | Не ждал 5–15 минут, пока `example.invalid` перейдёт из pending в firing. Условие `probe_success == 0` уже есть, порог по времени покрыт `promtool test rules` |
-| DOCKER-USER на живом хосте | Не применялся. Скрипт гонялся только с `--dry-run` и с заведомо плохим CIDR |
+| DOCKER-USER на живом хосте | Проверял отдельно. `--dport 18443 -j DROP` в `DOCKER-USER` не остановил `curl` с другого контейнера (ответ 200). Правило с `--ctorigdstport` на этой ВМ тоже набрало 0 пакетов: одновременно живут iptables-legacy и nft, а порт слушает `docker-proxy`. Поэтому в скрипте оба пути, но таймаут «снаружи allow-CIDR» здесь не доказан |
+| `ansible-playbook` без `--syntax-check` | Не запускался на сервере. Поведение `getent` с `failed_when: false` проверено отдельным мини-плейбуком: отсутствующий пользователь даёт `succeeded=True`, поэтому роль больше не смотрит на `is failed` |
 | `ansible-playbook` без `--syntax-check` | Не запускался. Секреты на сервер не выписывались, systemd-таймеры не ставились |
 | journald / настоящий restic | Не проверялись. Фикстуры JSON и `auth.log` — да |
 | Две таблицы iptables на этой ВМ | У `iptables-legacy` политика FORWARD была DROP и не знала мост compose, из-за этого контейнеры не видели друг друга. Для проверки я выставил на ВМ `FORWARD ACCEPT`. В репозиторий это не входит: на обычном хосте Docker сидит на одном бэкенде iptables/nft. Это не доказательство DOCKER-USER |

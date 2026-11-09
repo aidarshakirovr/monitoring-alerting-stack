@@ -93,7 +93,15 @@ if [[ -n "${SSH_AUTH_LOG_FILE:-}" ]]; then
     fail_collect
   fi
   tail -n "${TAIL_LINES}" -- "${SSH_AUTH_LOG_FILE}" > "${RAW}"
-elif command -v journalctl >/dev/null 2>&1 && journalctl --since "-${WINDOW} seconds ago" -o cat --no-pager _COMM=sshd > "${RAW}" 2>/dev/null; then
+elif command -v journalctl >/dev/null 2>&1 && journalctl \
+  --since "${WINDOW} seconds ago" \
+  -o cat \
+  --no-pager \
+  _SYSTEMD_UNIT=ssh.service \
+  + _SYSTEMD_UNIT=sshd.service \
+  + SYSLOG_IDENTIFIER=sshd \
+  + SYSLOG_IDENTIFIER=sshd-session \
+  > "${RAW}" 2>/dev/null; then
   SOURCE="journal"
   ASSUME="1"
 elif [[ -r /var/log/auth.log ]]; then

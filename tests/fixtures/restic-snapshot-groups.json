@@ -1,0 +1,14 @@
+[
+  {
+    "time": "2026-11-08T00:00:00.123456789+03:00",
+    "hostname": "app",
+    "paths": ["/srv/app/data"],
+    "short_id": "old"
+  },
+  {
+    "time": "2026-11-09T06:00:00+00:00",
+    "hostname": "app",
+    "paths": ["/srv/other"],
+    "short_id": "new"
+  }
+]

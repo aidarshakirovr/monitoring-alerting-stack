@@ -78,6 +78,8 @@ groups:
             /
             node_filesystem_files{fstype!~"tmpfs|overlay|squashfs|aufs|devtmpfs|ramfs|fuse.*"}
           ) < 0.10
+          and
+          node_filesystem_files{fstype!~"tmpfs|overlay|squashfs|aufs|devtmpfs|ramfs|fuse.*"} > 0
         for: 15m
         labels:
           severity: warning
@@ -150,14 +152,14 @@ groups:
   - name: restic
     rules:
       - alert: ResticSnapshotOlderThanRPO
-        expr: restic_snapshot_age_seconds > restic_rpo_threshold_seconds
+        expr: (time() - restic_last_snapshot_timestamp_seconds) > restic_rpo_threshold_seconds
         for: 15m
         labels:
           severity: critical
           component: restic
         annotations:
           summary: "Снапшот restic старше порога RPO ({{ $labels.repo }})"
-          description: "Порог пишет скрипт: RPO (по умолчанию 4 часа из репозитория backup) плюс grace 1 час. for 15 минут — два цикла textfile, а не SLA."
+          description: "Порог — RPO (4 часа из репозитория backup) плюс grace 1 час. Возраст растёт от метки времени между тиками textfile. for 15 минут — не SLA."
           runbook: "docs/RUNBOOK.md#resticsnapshotolderthanrpo"
 
       - alert: ResticSnapshotCheckFailed
@@ -272,6 +274,30 @@ groups:
           description: "Каталог недоступен или .prom не разбирается. Битый файл не обновляет mtime, поэтому отдельный сигнал нужен."
           runbook: "docs/RUNBOOK.md#nodetextfilescrapeerror"
 
+  - name: firewall
+    rules:
+      - alert: MonitoringDockerUserNotApplied
+        expr: monitoring_docker_user_applied{family="ipv4"} == 0
+        for: 10m
+        labels:
+          severity: critical
+          component: firewall
+        annotations:
+          summary: "Правила DOCKER-USER для прокси не записаны"
+          description: "Скрипт monitoring-docker-user.sh не смог обновить цепочку. Пока метрика 0, ограничение опубликованного порта не действует. 10 минут — два тика таймера, не SLA."
+          runbook: "docs/RUNBOOK.md#monitoringdockerusernotapplied"
+
+      - alert: MonitoringDockerUserStale
+        expr: (time() - node_textfile_mtime_seconds{file=~".*docker_user\\.prom"}) > 900
+        for: 5m
+        labels:
+          severity: warning
+          component: firewall
+        annotations:
+          summary: "Файл метрик DOCKER-USER не обновлялся дольше 15 минут"
+          description: "Таймер — 5 минут. 15 минут — три пропуска. Без свежей метрики нельзя отличить живые правила от давно снятых."
+          runbook: "docs/RUNBOOK.md#monitoringdockeruserstale"
+
   - name: pipeline
     rules:
       - alert: Watchdog
@@ -281,5 +307,5 @@ groups:
           component: pipeline
         annotations:
           summary: "Сторожевой сигнал пайплайна алертов"
-          description: "Должен гореть всегда. Если погас — не доходят правила, Prometheus или маршрут. Не страница для человека, пока приёмник watchdog пустой."
+          description: "Должен гореть всегда. Если погас — не доходят правила или Prometheus. Без webhook это только UI. На production роль требует vault_watchdog_webhook_url."
           runbook: "docs/RUNBOOK.md#watchdog"

@@ -12,7 +12,7 @@ MONITORING_SECRETS_DIR="${WORK}" bash "${ROOT}/scripts/bootstrap-local-secrets.s
 [[ "$(stat -c '%a' "${WORK}/compose.env")" == "600" ]]
 [[ "$(stat -c '%a' "${WORK}/tls/server.key")" == "600" ]]
 # shellcheck disable=SC2016
-grep -q '^monitoring:\$apr1\$' "${WORK}/htpasswd"
+grep -q '^monitoring:\$6\$' "${WORK}/htpasswd"
 openssl x509 -in "${WORK}/tls/server.crt" -noout -subject | grep -q 'monitoring.example'
 grep -q '^GRAFANA_ADMIN_PASSWORD=.' "${WORK}/compose.env"
 

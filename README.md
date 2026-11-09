@@ -94,7 +94,7 @@ bash scripts/ci-local.sh
 | `docs/VERIFICATION.md` | Что реально прогнано |
 | `.github/workflows/validate.yml` | CI: `contents: read`, action по SHA |
 
-Образы закреплены тегами: Prometheus `v3.16.0`, Alertmanager `v0.34.2`, Grafana `13.3.0`, node_exporter `v1.12.1`, blackbox_exporter `v0.29.1`, nginx-unprivileged `1.29.8-alpine`. Digest не фиксировался.
+Образы закреплены тегом и digest: Prometheus `v3.16.0`, Alertmanager `v0.34.2`, Grafana `13.3.0`, node_exporter `v1.12.1`, blackbox_exporter `v0.29.1`, nginx-unprivileged `1.29.8-alpine`. Digest снят с манифеста, который скачала эта среда; на другой архитектуре его нужно сверить.
 
 ## Документы
 

@@ -111,11 +111,25 @@ else
     fail_measure
   fi
   export RESTIC_CACHE_DIR="${RESTIC_CACHE_DIR:-/var/cache/restic-backup}"
-  if ! restic snapshots \
-    --repo "${RESTIC_REPOSITORY}" \
-    --password-file "${RESTIC_PASSWORD_FILE}" \
-    --latest 1 \
-    --json > "${json_file}"; then
+  # --no-lock: это чтение. Лок пишется в репозиторий, а юнит держит
+  # ProtectSystem=strict и не может создать locks/ в /var/backups.
+  restic_cmd=(restic snapshots
+    --repo "${RESTIC_REPOSITORY}"
+    --password-file "${RESTIC_PASSWORD_FILE}"
+    --latest 1
+    --no-lock
+    --json)
+  if [[ -n "${RESTIC_SNAPSHOT_HOST:-}" ]]; then
+    restic_cmd+=(--host "${RESTIC_SNAPSHOT_HOST}")
+  fi
+  if [[ -n "${RESTIC_SNAPSHOT_PATHS:-}" ]]; then
+    local_path=""
+    IFS=',' read -ra restic_paths <<< "${RESTIC_SNAPSHOT_PATHS}"
+    for local_path in "${restic_paths[@]}"; do
+      restic_cmd+=(--path "${local_path}")
+    done
+  fi
+  if ! "${restic_cmd[@]}" > "${json_file}"; then
     echo "[ERROR] restic snapshots завершился с ошибкой" >&2
     fail_measure
   fi
@@ -126,6 +140,7 @@ parsed="$(
     python3 - "${json_file}" <<'PY'
 import json
 import os
+import re
 import sys
 from datetime import datetime, timezone
 
@@ -136,8 +151,31 @@ if isinstance(data, dict):
     data = [data]
 if not data:
     sys.exit(2)
-raw = str(data[0]["time"])
-stamp = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+
+def normalize_time(raw):
+    # Python <= 3.10 принимает не больше 6 знаков дробной части.
+    text = str(raw).replace("Z", "+00:00")
+    return re.sub(r"(\.\d{6})\d+", r"\1", text)
+
+def stamp_of(item):
+    return datetime.fromisoformat(normalize_time(item["time"]))
+
+host = os.environ.get("RESTIC_SNAPSHOT_HOST", "")
+paths = [item for item in os.environ.get("RESTIC_SNAPSHOT_PATHS", "").split(",") if item]
+chosen = []
+for item in data:
+    if host and item.get("hostname") != host:
+        continue
+    item_paths = item.get("paths") or []
+    if paths and not any(path in item_paths for path in paths):
+        continue
+    chosen.append(item)
+if not chosen:
+    sys.exit(2)
+# --latest 1 отдаёт последний снапшот каждой группы, не самый свежий в файле.
+# data[0] поэтому не годится: берём максимум по времени.
+best = max(chosen, key=stamp_of)
+stamp = stamp_of(best)
 epoch = stamp.timestamp()
 now_raw = os.environ.get("RESTIC_METRICS_NOW_EPOCH", "")
 if now_raw:

@@ -8,5 +8,7 @@ monitoring_restic_repository: /var/backups/restic-repo
 monitoring_restic_password_file: /etc/restic/backup.pass
 monitoring_restic_cache_dir: /var/cache/restic-backup
 monitoring_restic_repo_label: primary
+monitoring_restic_snapshot_host: ""
+monitoring_restic_snapshot_paths: "/srv/app/data"
 monitoring_ssh_window_seconds: 900
 monitoring_ssh_log_tail_lines: 5000

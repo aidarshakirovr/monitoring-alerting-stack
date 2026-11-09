@@ -273,15 +273,15 @@ tests:
 
   - interval: 1m
     input_series:
-      - series: 'restic_snapshot_age_seconds{repo="primary",instance="monitoring-host:9100",job="node"}'
-        values: '20000x30'
+      - series: 'restic_last_snapshot_timestamp_seconds{repo="primary",instance="monitoring-host:9100",job="node"}'
+        values: '0x40'
       - series: 'restic_rpo_threshold_seconds{repo="primary",instance="monitoring-host:9100",job="node"}'
-        values: '18000x30'
+        values: '0x40'
     alert_rule_test:
       - eval_time: 10m
         alertname: ResticSnapshotOlderThanRPO
         exp_alerts: []
-      - eval_time: 15m
+      - eval_time: 16m
         alertname: ResticSnapshotOlderThanRPO
         exp_alerts:
           - exp_labels:
@@ -292,7 +292,7 @@ tests:
               job: node
             exp_annotations:
               summary: "Снапшот restic старше порога RPO (primary)"
-              description: "Порог пишет скрипт: RPO (по умолчанию 4 часа из репозитория backup) плюс grace 1 час. for 15 минут — два цикла textfile, а не SLA."
+              description: "Порог — RPO (4 часа из репозитория backup) плюс grace 1 час. Возраст растёт от метки времени между тиками textfile. for 15 минут — не SLA."
               runbook: "docs/RUNBOOK.md#resticsnapshotolderthanrpo"
 
   - interval: 1m
@@ -520,5 +520,49 @@ tests:
               component: pipeline
             exp_annotations:
               summary: "Сторожевой сигнал пайплайна алертов"
-              description: "Должен гореть всегда. Если погас — не доходят правила, Prometheus или маршрут. Не страница для человека, пока приёмник watchdog пустой."
+              description: "Должен гореть всегда. Если погас — не доходят правила или Prometheus. Без webhook это только UI. На production роль требует vault_watchdog_webhook_url."
               runbook: "docs/RUNBOOK.md#watchdog"
+
+  - interval: 1m
+    input_series:
+      - series: 'monitoring_docker_user_applied{family="ipv4",instance="monitoring-host:9100",job="node"}'
+        values: '0x20'
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: MonitoringDockerUserNotApplied
+        exp_alerts: []
+      - eval_time: 10m
+        alertname: MonitoringDockerUserNotApplied
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              component: firewall
+              family: ipv4
+              instance: monitoring-host:9100
+              job: node
+            exp_annotations:
+              summary: "Правила DOCKER-USER для прокси не записаны"
+              description: "Скрипт monitoring-docker-user.sh не смог обновить цепочку. Пока метрика 0, ограничение опубликованного порта не действует. 10 минут — два тика таймера, не SLA."
+              runbook: "docs/RUNBOOK.md#monitoringdockerusernotapplied"
+
+  - interval: 1m
+    input_series:
+      - series: 'node_textfile_mtime_seconds{file="/textfile/docker_user.prom",instance="monitoring-host:9100",job="node"}'
+        values: '0x30'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: MonitoringDockerUserStale
+        exp_alerts: []
+      - eval_time: 21m
+        alertname: MonitoringDockerUserStale
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              component: firewall
+              file: /textfile/docker_user.prom
+              instance: monitoring-host:9100
+              job: node
+            exp_annotations:
+              summary: "Файл метрик DOCKER-USER не обновлялся дольше 15 минут"
+              description: "Таймер — 5 минут. 15 минут — три пропуска. Без свежей метрики нельзя отличить живые правила от давно снятых."
+              runbook: "docs/RUNBOOK.md#monitoringdockeruserstale"
