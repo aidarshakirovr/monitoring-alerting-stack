@@ -1,0 +1,50 @@
+---
+# Несекретные параметры стенда. Пароли — только в vault.yml (см. vault.yml.example).
+# Безопасный умолчательный bind — loopback. Публикация на другой адрес
+# требует ещё и monitoring_allow_cidrs, и проверки DOCKER-USER (docs/RISKS.md).
+
+monitoring_bind_ip: "127.0.0.1"
+monitoring_grafana_port: 8443
+monitoring_prometheus_port: 8444
+monitoring_alertmanager_port: 8445
+monitoring_install_root: /opt/monitoring-stack
+monitoring_proxy_gid: "101"
+monitoring_grafana_admin_user: admin
+monitoring_grafana_root_url: "https://127.0.0.1:8443"
+monitoring_textfile_dir: /var/lib/node_exporter/textfile
+
+# 4 часа — заявленный RPO из репозитория backup, не замер этого стенда.
+# 1 час — непромеренный запас на длительность backup и джиттер таймера.
+monitoring_rpo_hours: 4
+monitoring_rpo_grace_hours: 1
+monitoring_restic_user: restic-backup
+monitoring_restic_group: restic-backup
+monitoring_restic_repository: /var/backups/restic-repo
+monitoring_restic_password_file: /etc/restic/backup.pass
+monitoring_restic_cache_dir: /var/cache/restic-backup
+monitoring_restic_repo_label: primary
+# Пустой host — не фильтровать. Путь по умолчанию совпадает с /srv/app/data
+# из репозитория backup. Несколько групп без фильтра прячут старый бэкап
+# за свежим: задайте путь явно.
+monitoring_restic_snapshot_host: ""
+monitoring_restic_snapshot_paths: "/srv/app/data"
+
+# 900 секунд = 15 минут, то же окно, что в комментарии к порогу SSH-алерта.
+monitoring_ssh_window_seconds: 900
+monitoring_ssh_log_tail_lines: 5000
+
+monitoring_allow_cidrs:
+  - 127.0.0.0/8
+monitoring_allow_cidrs_v6:
+  - "::1/128"
+
+# Роль не включает UFW. Docker всё равно обходит INPUT, см. docs/ARCHITECTURE.md.
+monitoring_ufw_enabled: false
+
+monitoring_http_targets:
+  - https://example.invalid/health
+monitoring_tls_targets:
+  - example.invalid:443
+
+monitoring_prometheus_image: prom/prometheus:v3.16.0@sha256:e04987641b57704f408e31f6373ba4138ecf27cb4a165d24aabb6c38fddd0f06
+monitoring_alertmanager_gid: "65534"

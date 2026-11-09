@@ -1,0 +1,12 @@
+---
+monitoring_grafana_port: 8443
+monitoring_prometheus_port: 8444
+monitoring_alertmanager_port: 8445
+monitoring_allow_cidrs:
+  - 127.0.0.0/8
+monitoring_allow_cidrs_v6:
+  - "::1/128"
+monitoring_ufw_enabled: false
+monitoring_bind_ip: "127.0.0.1"
+monitoring_bind_ip_v6: "::1"
+monitoring_textfile_dir: /var/lib/node_exporter/textfile

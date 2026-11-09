@@ -1,0 +1,57 @@
+# Пример маршрутизации без исходящих webhook.
+# Пустой receiver принимает алерт и никуда его не отправляет.
+# Боевой URL подставляет роль monitoring_stack из Ansible Vault.
+# Пока URL пустой, стенд не звонит наружу — и не считает себя дежурным.
+---
+global:
+  resolve_timeout: 5m
+
+route:
+  receiver: default
+  group_by:
+    - alertname
+    - severity
+    - instance
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+  routes:
+    - matchers:
+        - severity = none
+      receiver: watchdog
+      group_wait: 0s
+      repeat_interval: 1h
+    - matchers:
+        - severity = critical
+      receiver: critical
+      repeat_interval: 1h
+    - matchers:
+        - severity = warning
+      receiver: warning
+
+inhibit_rules:
+  - source_matchers:
+      - alertname = DiskSpaceCritical
+    target_matchers:
+      - alertname = DiskSpaceLow
+    equal:
+      - instance
+      - mountpoint
+  - source_matchers:
+      - alertname = TlsCertificateExpiresCriticallySoon
+    target_matchers:
+      - alertname = TlsCertificateExpiresSoon
+    equal:
+      - instance
+  - source_matchers:
+      - alertname = SshAuthFailuresCritical
+    target_matchers:
+      - alertname = SshAuthFailuresHigh
+    equal:
+      - instance
+
+receivers:
+  - name: default
+  - name: watchdog
+  - name: critical
+  - name: warning

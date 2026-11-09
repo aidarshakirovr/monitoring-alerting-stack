@@ -1,0 +1,9 @@
+# Пример. Ansible перезаписывает файл из monitoring_http_targets.
+# example.invalid специально не резолвится: стенд из коробки будет
+# гореть HttpEndpointDown, пока цель не заменят. Это лучше, чем молча
+# проверять чужой сайт.
+---
+- targets:
+    - https://example.invalid/health
+  labels:
+    env: example

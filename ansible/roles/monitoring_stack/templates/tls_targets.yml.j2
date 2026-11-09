@@ -1,0 +1,7 @@
+---
+- targets:
+{% for target in monitoring_tls_targets %}
+    - {{ target | to_json }}
+{% endfor %}
+  labels:
+    env: {{ env | default('example') | to_json }}

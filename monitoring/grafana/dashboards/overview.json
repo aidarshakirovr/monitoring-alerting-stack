@@ -1,0 +1,181 @@
+{
+  "uid": "sec-overview",
+  "title": "Мониторинг и безопасность",
+  "timezone": "utc",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "editable": false,
+  "tags": ["security", "monitoring"],
+  "time": {"from": "now-6h", "to": "now"},
+  "panels": [
+    {
+      "id": 1,
+      "type": "text",
+      "title": "Как читать пороги",
+      "gridPos": {"h": 4, "w": 24, "x": 0, "y": 0},
+      "options": {
+        "mode": "markdown",
+        "content": "Пороги на дашборде и в алертах — операционные буферы, не SLA. Откуда числа: `docs/ARCHITECTURE.md`, раздел «Пороги». Цели `example.invalid` в примере специально не резолвятся."
+      }
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Экспортеры (up)",
+      "gridPos": {"h": 6, "w": 6, "x": 0, "y": 4},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [
+        {"refId": "A", "expr": "up{job=~\"node|blackbox|prometheus|alertmanager\"}"}
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "red", "value": null},
+              {"color": "green", "value": 1}
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"]}, "colorMode": "background"}
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Внешние и внутренние пробы",
+      "gridPos": {"h": 6, "w": 6, "x": 6, "y": 4},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [
+        {"refId": "A", "expr": "probe_success"}
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "red", "value": null},
+              {"color": "green", "value": 1}
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"]}, "colorMode": "background"}
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Дней до истечения TLS",
+      "gridPos": {"h": 6, "w": 6, "x": 12, "y": 4},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "(probe_ssl_earliest_cert_expiry{job=\"blackbox-tls\"} - time()) / 86400"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 1,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "red", "value": null},
+              {"color": "yellow", "value": 3},
+              {"color": "green", "value": 14}
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"]}, "colorMode": "background"}
+    },
+    {
+      "id": 5,
+      "type": "stat",
+      "title": "Возраст снапшота restic, часы",
+      "gridPos": {"h": 6, "w": 6, "x": 18, "y": 4},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [
+        {"refId": "A", "expr": "restic_snapshot_age_seconds / 3600"}
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 1,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "green", "value": null},
+              {"color": "red", "value": 5}
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"]}, "colorMode": "background"}
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Свободное место, % (без tmpfs и overlay)",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 10},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "100 * node_filesystem_avail_bytes{fstype!~\"tmpfs|overlay|squashfs|aufs|devtmpfs|ramfs|fuse.*\"} / node_filesystem_size_bytes{fstype!~\"tmpfs|overlay|squashfs|aufs|devtmpfs|ramfs|fuse.*\"}",
+          "legendFormat": "{{mountpoint}}"
+        }
+      ],
+      "fieldConfig": {"defaults": {"unit": "percent", "min": 0, "max": 100}, "overrides": []}
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "Неудачные SSH за окно",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 10},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "ssh_auth_failures_last_window",
+          "legendFormat": "failures {{source}}"
+        },
+        {
+          "refId": "B",
+          "expr": "ssh_auth_failure_unique_sources_last_window",
+          "legendFormat": "sources {{source}}"
+        }
+      ],
+      "fieldConfig": {"defaults": {"min": 0}, "overrides": []}
+    },
+    {
+      "id": 8,
+      "type": "timeseries",
+      "title": "Restic: возраст и порог, секунды",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 18},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [
+        {"refId": "A", "expr": "restic_snapshot_age_seconds", "legendFormat": "age {{repo}}"},
+        {"refId": "B", "expr": "restic_rpo_threshold_seconds", "legendFormat": "threshold {{repo}}"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "s"}, "overrides": []}
+    },
+    {
+      "id": 9,
+      "type": "timeseries",
+      "title": "Сбор textfile и внутренние пробы",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 18},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [
+        {"refId": "A", "expr": "restic_snapshot_check_success", "legendFormat": "restic {{repo}}"},
+        {"refId": "B", "expr": "ssh_auth_metrics_collection_success", "legendFormat": "ssh {{source}}"},
+        {"refId": "C", "expr": "node_textfile_scrape_error", "legendFormat": "textfile error"}
+      ],
+      "fieldConfig": {"defaults": {"min": 0, "max": 1}, "overrides": []}
+    }
+  ]
+}

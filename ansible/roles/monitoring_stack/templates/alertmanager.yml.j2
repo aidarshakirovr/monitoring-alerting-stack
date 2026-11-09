@@ -1,0 +1,68 @@
+---
+global:
+  resolve_timeout: 5m
+
+route:
+  receiver: default
+  group_by:
+    - alertname
+    - severity
+    - instance
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+  routes:
+    - matchers:
+        - severity = none
+      receiver: watchdog
+      group_wait: 0s
+      repeat_interval: 1h
+    - matchers:
+        - severity = critical
+      receiver: critical
+      repeat_interval: 1h
+    - matchers:
+        - severity = warning
+      receiver: warning
+
+inhibit_rules:
+  - source_matchers:
+      - alertname = DiskSpaceCritical
+    target_matchers:
+      - alertname = DiskSpaceLow
+    equal:
+      - instance
+      - mountpoint
+  - source_matchers:
+      - alertname = TlsCertificateExpiresCriticallySoon
+    target_matchers:
+      - alertname = TlsCertificateExpiresSoon
+    equal:
+      - instance
+  - source_matchers:
+      - alertname = SshAuthFailuresCritical
+    target_matchers:
+      - alertname = SshAuthFailuresHigh
+    equal:
+      - instance
+
+receivers:
+  - name: default
+  - name: watchdog
+{% if vault_watchdog_webhook_url | default('') | length > 0 and 'REPLACE_ME' not in vault_watchdog_webhook_url %}
+    webhook_configs:
+      - url_file: /etc/alertmanager/webhook-watchdog.url
+        send_resolved: false
+{% endif %}
+  - name: critical
+{% if vault_alertmanager_webhook_url | default('') | length > 0 and 'REPLACE_ME' not in vault_alertmanager_webhook_url %}
+    webhook_configs:
+      - url_file: /etc/alertmanager/webhook-alert.url
+        send_resolved: true
+{% endif %}
+  - name: warning
+{% if vault_alertmanager_webhook_url | default('') | length > 0 and 'REPLACE_ME' not in vault_alertmanager_webhook_url %}
+    webhook_configs:
+      - url_file: /etc/alertmanager/webhook-alert.url
+        send_resolved: true
+{% endif %}

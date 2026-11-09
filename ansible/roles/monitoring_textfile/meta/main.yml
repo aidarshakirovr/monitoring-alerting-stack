@@ -1,0 +1,12 @@
+---
+galaxy_info:
+  author: aidarshakirovr
+  description: Таймеры textfile для возраста снапшота restic и неудачных SSH-входов
+  license: MIT
+  min_ansible_version: "2.16"
+  platforms:
+    - name: Ubuntu
+      versions:
+        - jammy
+        - noble
+dependencies: []

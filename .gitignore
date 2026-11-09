@@ -1,0 +1,6 @@
+.env
+*.retry
+.ansible/
+__pycache__/
+ansible/group_vars/**/vault.yml
+docker/secrets/

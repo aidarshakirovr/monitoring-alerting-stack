@@ -1,0 +1,35 @@
+---
+- name: Перечитать процессы стека
+  ansible.builtin.command:
+    argv: [docker, kill, --signal=HUP, "{{ item }}"]
+  loop:
+    - monitoring-prometheus
+    - monitoring-alertmanager
+    - monitoring-blackbox-exporter
+  changed_when: true
+  when: not ansible_check_mode
+  listen: Перечитать конфигурацию стека
+
+- name: Перечитать nginx
+  ansible.builtin.command:
+    argv: [docker, exec, monitoring-proxy, nginx, -s, reload]
+  changed_when: true
+  when: not ansible_check_mode
+  listen: Перечитать конфигурацию стека
+
+- name: Сбросить пароль администратора Grafana
+  ansible.builtin.command:
+    argv:
+      - docker
+      - exec
+      - -i
+      - monitoring-grafana
+      - grafana
+      - cli
+      - admin
+      - reset-admin-password
+      - --password-from-stdin
+    stdin: "{{ monitoring_stack_grafana_password }}"
+  changed_when: true
+  no_log: true
+  when: not ansible_check_mode

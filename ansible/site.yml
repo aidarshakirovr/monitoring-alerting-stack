@@ -1,0 +1,21 @@
+---
+- name: Подготовить textfile-метрики на хосте
+  hosts: monitoring
+  become: true
+  roles:
+    - role: monitoring_textfile
+      tags: [textfile]
+
+- name: Развернуть стек Prometheus, Alertmanager и Grafana
+  hosts: monitoring
+  become: true
+  roles:
+    - role: monitoring_stack
+      tags: [stack]
+
+- name: Ограничить опубликованные порты в DOCKER-USER
+  hosts: monitoring
+  become: true
+  roles:
+    - role: monitoring_firewall
+      tags: [firewall]

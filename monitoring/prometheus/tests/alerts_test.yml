@@ -1,0 +1,588 @@
+# Юнит-тесты правил. Время теста начинается с 0, time() совпадает с eval_time.
+# for проверяется вместе с порогом: ранний eval_time обязан быть пустым.
+---
+rule_files:
+  - ../rules/alerts.yml
+
+evaluation_interval: 1m
+
+tests:
+  - interval: 1m
+    input_series:
+      - series: 'up{job="node",instance="monitoring-host:9100"}'
+        values: '0x20'
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: ExporterDown
+        exp_alerts: []
+      - eval_time: 5m
+        alertname: ExporterDown
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              component: exporter
+              job: node
+              instance: monitoring-host:9100
+            exp_annotations:
+              summary: "Экспортер node недоступен (monitoring-host:9100)"
+              description: "Scrape не удаётся дольше 5 минут. Интервал scrape — 30 секунд, поэтому порог — около десяти неудач подряд, а не один обрыв. Это не SLA."
+              runbook: "docs/RUNBOOK.md#exporterdown"
+
+  - interval: 1m
+    input_series:
+      - series: 'up{job="node",instance="monitoring-host:9100"}'
+        values: '1x20'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: ExporterDown
+        exp_alerts: []
+
+  - interval: 1m
+    input_series:
+      - series: 'up{job="blackbox-http",instance="https://example.invalid/health"}'
+        values: '0x20'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: ExporterDown
+        exp_alerts: []
+
+  - interval: 1m
+    input_series:
+      - series: 'probe_success{job="blackbox-internal",instance="http://grafana:3000/api/health"}'
+        values: '0x20'
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: MonitoringComponentUnhealthy
+        exp_alerts: []
+      - eval_time: 5m
+        alertname: MonitoringComponentUnhealthy
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              component: probe
+              job: blackbox-internal
+              instance: http://grafana:3000/api/health
+            exp_annotations:
+              summary: "Внутренний health-check не проходит (http://grafana:3000/api/health)"
+              description: "Blackbox не получает HTTP 200 с Grafana, Prometheus или Alertmanager внутри сети Docker. Это не проверка внешнего сайта."
+              runbook: "docs/RUNBOOK.md#monitoringcomponentunhealthy"
+
+  - interval: 1m
+    input_series:
+      - series: 'node_filesystem_avail_bytes{device="/dev/vda1",fstype="ext4",mountpoint="/",instance="monitoring-host:9100",job="node"}'
+        values: '1000x30'
+      - series: 'node_filesystem_size_bytes{device="/dev/vda1",fstype="ext4",mountpoint="/",instance="monitoring-host:9100",job="node"}'
+        values: '10000x30'
+      - series: 'node_filesystem_readonly{device="/dev/vda1",fstype="ext4",mountpoint="/",instance="monitoring-host:9100",job="node"}'
+        values: '0x30'
+      - series: 'node_filesystem_avail_bytes{device="tmpfs",fstype="tmpfs",mountpoint="/run",instance="monitoring-host:9100",job="node"}'
+        values: '100x30'
+      - series: 'node_filesystem_size_bytes{device="tmpfs",fstype="tmpfs",mountpoint="/run",instance="monitoring-host:9100",job="node"}'
+        values: '10000x30'
+      - series: 'node_filesystem_readonly{device="tmpfs",fstype="tmpfs",mountpoint="/run",instance="monitoring-host:9100",job="node"}'
+        values: '0x30'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: DiskSpaceLow
+        exp_alerts: []
+      - eval_time: 15m
+        alertname: DiskSpaceLow
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              component: disk
+              device: /dev/vda1
+              fstype: ext4
+              mountpoint: /
+              instance: monitoring-host:9100
+              job: node
+            exp_annotations:
+              summary: "Мало свободного места на / (monitoring-host:9100)"
+              description: "Свободная доля ниже 15% и не ниже 5% дольше 15 минут. Доля, а не гигабайты: размер диска в этом репозитории не фиксирован. Это не SLA."
+              runbook: "docs/RUNBOOK.md#diskspacelow"
+      - eval_time: 15m
+        alertname: DiskSpaceCritical
+        exp_alerts: []
+
+  - interval: 1m
+    input_series:
+      - series: 'node_filesystem_avail_bytes{device="/dev/vda1",fstype="ext4",mountpoint="/",instance="monitoring-host:9100",job="node"}'
+        values: '400x20'
+      - series: 'node_filesystem_size_bytes{device="/dev/vda1",fstype="ext4",mountpoint="/",instance="monitoring-host:9100",job="node"}'
+        values: '10000x20'
+      - series: 'node_filesystem_readonly{device="/dev/vda1",fstype="ext4",mountpoint="/",instance="monitoring-host:9100",job="node"}'
+        values: '0x20'
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: DiskSpaceCritical
+        exp_alerts: []
+      - eval_time: 5m
+        alertname: DiskSpaceCritical
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              component: disk
+              device: /dev/vda1
+              fstype: ext4
+              mountpoint: /
+              instance: monitoring-host:9100
+              job: node
+            exp_annotations:
+              summary: "Место на / почти закончилось (monitoring-host:9100)"
+              description: "Свободно меньше 5% дольше 5 минут. Диск может заполниться быстрее этого окна — алерт тогда опоздает. Это не SLA."
+              runbook: "docs/RUNBOOK.md#diskspacecritical"
+      - eval_time: 15m
+        alertname: DiskSpaceLow
+        exp_alerts: []
+
+  - interval: 1m
+    input_series:
+      - series: 'node_filesystem_files_free{device="/dev/vda1",fstype="ext4",mountpoint="/",instance="monitoring-host:9100",job="node"}'
+        values: '50x30'
+      - series: 'node_filesystem_files{device="/dev/vda1",fstype="ext4",mountpoint="/",instance="monitoring-host:9100",job="node"}'
+        values: '1000x30'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: DiskInodesLow
+        exp_alerts: []
+      - eval_time: 15m
+        alertname: DiskInodesLow
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              component: disk
+              device: /dev/vda1
+              fstype: ext4
+              mountpoint: /
+              instance: monitoring-host:9100
+              job: node
+            exp_annotations:
+              summary: "Мало свободных inode на / (monitoring-host:9100)"
+              description: "Свободных inode меньше 10% дольше 15 минут. Запись может сломаться при свободных байтах. Это не SLA."
+              runbook: "docs/RUNBOOK.md#diskinodeslow"
+
+  - interval: 1m
+    input_series:
+      - series: 'node_filesystem_readonly{device="/dev/vda1",fstype="ext4",mountpoint="/",instance="monitoring-host:9100",job="node"}'
+        values: '1x20'
+      - series: 'node_filesystem_readonly{device="tmpfs",fstype="tmpfs",mountpoint="/run",instance="monitoring-host:9100",job="node"}'
+        values: '1x20'
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: FilesystemReadOnly
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              component: disk
+              device: /dev/vda1
+              fstype: ext4
+              mountpoint: /
+              instance: monitoring-host:9100
+              job: node
+            exp_annotations:
+              summary: "Файловая система / только для чтения (monitoring-host:9100)"
+              description: "Ядро перемонтировало ФС в ro или она смонтирована так дольше 5 минут. Часто это ошибки диска, а не плановая политика."
+              runbook: "docs/RUNBOOK.md#filesystemreadonly"
+
+  - interval: 1m
+    input_series:
+      - series: 'probe_success{job="blackbox-http",instance="https://example.invalid/health"}'
+        values: '0x20'
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: HttpEndpointDown
+        exp_alerts: []
+      - eval_time: 5m
+        alertname: HttpEndpointDown
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              component: probe
+              job: blackbox-http
+              instance: https://example.invalid/health
+            exp_annotations:
+              summary: "Внешний HTTP-endpoint недоступен (https://example.invalid/health)"
+              description: "Blackbox не получил ожидаемый ответ дольше 5 минут. Модуль http_2xx не следует редиректам и не отключает проверку TLS."
+              runbook: "docs/RUNBOOK.md#httpendpointdown"
+
+  - interval: 1m
+    input_series:
+      - series: 'probe_ssl_earliest_cert_expiry{job="blackbox-tls",instance="example.invalid:443"}'
+        values: '864000x120'
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: TlsCertificateExpiresSoon
+        exp_alerts: []
+      - eval_time: 1h
+        alertname: TlsCertificateExpiresSoon
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              component: tls
+              job: blackbox-tls
+              instance: example.invalid:443
+            exp_annotations:
+              summary: "TLS-сертификат example.invalid:443 истекает меньше чем через 14 дней"
+              description: "14 дней — запас после типичного автопродления на 30-м дне у сертификата на 90 дней. Если продление ручное и сертификат годовой, порог надо поднять. Это не SLA."
+              runbook: "docs/RUNBOOK.md#tlscertificateexpiressoon"
+      - eval_time: 1h
+        alertname: TlsCertificateExpiresCriticallySoon
+        exp_alerts: []
+
+  - interval: 1m
+    input_series:
+      - series: 'probe_ssl_earliest_cert_expiry{job="blackbox-tls",instance="example.invalid:443"}'
+        values: '172800x40'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: TlsCertificateExpiresCriticallySoon
+        exp_alerts: []
+      - eval_time: 15m
+        alertname: TlsCertificateExpiresCriticallySoon
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              component: tls
+              job: blackbox-tls
+              instance: example.invalid:443
+            exp_annotations:
+              summary: "TLS-сертификат example.invalid:443 истекает меньше чем через 3 дня"
+              description: "3 дня оставляют будний цикл на ручную замену и не переживают длинные выходные без человека. Это не SLA."
+              runbook: "docs/RUNBOOK.md#tlscertificateexpirescriticallysoon"
+      - eval_time: 1h
+        alertname: TlsCertificateExpiresSoon
+        exp_alerts: []
+
+  - interval: 1m
+    input_series:
+      - series: 'probe_success{job="blackbox-tls",instance="example.invalid:443"}'
+        values: '0x20'
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: TlsProbeFailed
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              component: tls
+              job: blackbox-tls
+              instance: example.invalid:443
+            exp_annotations:
+              summary: "TLS-проверка example.invalid:443 не выполняется"
+              description: "Рукопожатие не удалось, срок сертификата неизвестен. insecure_skip_verify в модуле выключен специально."
+              runbook: "docs/RUNBOOK.md#tlsprobefailed"
+
+  - interval: 1m
+    input_series:
+      - series: 'restic_last_snapshot_timestamp_seconds{repo="primary",instance="monitoring-host:9100",job="node"}'
+        values: '0x40'
+      - series: 'restic_rpo_threshold_seconds{repo="primary",instance="monitoring-host:9100",job="node"}'
+        values: '0x40'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: ResticSnapshotOlderThanRPO
+        exp_alerts: []
+      - eval_time: 16m
+        alertname: ResticSnapshotOlderThanRPO
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              component: restic
+              repo: primary
+              instance: monitoring-host:9100
+              job: node
+            exp_annotations:
+              summary: "Снапшот restic старше порога RPO (primary)"
+              description: "Порог — RPO (4 часа из репозитория backup) плюс grace 1 час. Возраст растёт от метки времени между тиками textfile. for 15 минут — не SLA."
+              runbook: "docs/RUNBOOK.md#resticsnapshotolderthanrpo"
+
+  - interval: 1m
+    input_series:
+      - series: 'restic_snapshot_check_success{repo="primary",instance="monitoring-host:9100",job="node"}'
+        values: '0x20'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: ResticSnapshotCheckFailed
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              component: restic
+              repo: primary
+              instance: monitoring-host:9100
+              job: node
+            exp_annotations:
+              summary: "Проверка снапшота restic не удалась (primary)"
+              description: "Скрипт не смог прочитать снапшот: нет restic, пароля, репозитория или список пуст. Возраст в этом случае неизвестен."
+              runbook: "docs/RUNBOOK.md#resticsnapshotcheckfailed"
+
+  - interval: 1m
+    input_series:
+      - series: 'node_textfile_mtime_seconds{file="/textfile/restic_snapshot.prom",instance="monitoring-host:9100",job="node"}'
+        values: '0x50'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: ResticTextfileStale
+        exp_alerts: []
+      - eval_time: 40m
+        alertname: ResticTextfileStale
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              component: restic
+              file: /textfile/restic_snapshot.prom
+              instance: monitoring-host:9100
+              job: node
+            exp_annotations:
+              summary: "Файл метрик restic не обновлялся дольше 30 минут"
+              description: "Таймер — 15 минут. 30 минут — два пропуска. Застывший возраст выглядит здоровым, поэтому смотрим mtime. Это не SLA."
+              runbook: "docs/RUNBOOK.md#restictextfilestale"
+
+  - interval: 1m
+    input_series:
+      - series: 'up{job="prometheus",instance="localhost:9090"}'
+        values: '1x40'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: ResticMetricsAbsent
+        exp_alerts: []
+      - eval_time: 30m
+        alertname: ResticMetricsAbsent
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              component: restic
+            exp_annotations:
+              summary: "Метрик restic нет дольше 30 минут"
+              description: "Textfile не появился или node_exporter его не отдал. Если restic на этом хосте не нужен, алерт надо убрать, а не заглушать молча."
+              runbook: "docs/RUNBOOK.md#resticmetricsabsent"
+
+  - interval: 1m
+    input_series:
+      - series: 'ssh_auth_failures_last_window{source="journal",instance="monitoring-host:9100",job="node"}'
+        values: '25x30'
+      - series: 'ssh_auth_failure_unique_sources_last_window{source="journal",instance="monitoring-host:9100",job="node"}'
+        values: '2x30'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: SshAuthFailuresHigh
+        exp_alerts: []
+      - eval_time: 15m
+        alertname: SshAuthFailuresHigh
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              component: ssh
+              source: journal
+              instance: monitoring-host:9100
+              job: node
+            exp_annotations:
+              summary: "Много неудачных SSH-входов (monitoring-host:9100)"
+              description: "Больше 20 неудач в окне скрипта (по умолчанию 15 минут) и это держится 15 минут. Порог — эвристика, не базовая линия с этого хоста."
+              runbook: "docs/RUNBOOK.md#sshauthfailureshigh"
+      - eval_time: 15m
+        alertname: SshAuthFailuresCritical
+        exp_alerts: []
+      - eval_time: 15m
+        alertname: SshBruteforceSources
+        exp_alerts: []
+
+  - interval: 1m
+    input_series:
+      - series: 'ssh_auth_failures_last_window{source="journal",instance="monitoring-host:9100",job="node"}'
+        values: '20x30'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: SshAuthFailuresHigh
+        exp_alerts: []
+
+  - interval: 1m
+    input_series:
+      - series: 'ssh_auth_failures_last_window{source="journal",instance="monitoring-host:9100",job="node"}'
+        values: '150x20'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: SshAuthFailuresCritical
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              component: ssh
+              source: journal
+              instance: monitoring-host:9100
+              job: node
+            exp_annotations:
+              summary: "Очень много неудачных SSH-входов (monitoring-host:9100)"
+              description: "Больше 100 неудач в окне. Для словаря это мало, для опечатки человека — много. Подстройте после недели графика, не до."
+              runbook: "docs/RUNBOOK.md#sshauthfailurescritical"
+
+  - interval: 1m
+    input_series:
+      - series: 'ssh_auth_failure_unique_sources_last_window{source="file",instance="monitoring-host:9100",job="node"}'
+        values: '20x30'
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: SshBruteforceSources
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              component: ssh
+              source: file
+              instance: monitoring-host:9100
+              job: node
+            exp_annotations:
+              summary: "Неудачные SSH-входы с многих адресов (monitoring-host:9100)"
+              description: "Больше 15 разных адресов в окне. Один клиент так не выглядит. На хосте в интернете фон сканеров может быть выше — это не SLA."
+              runbook: "docs/RUNBOOK.md#sshbruteforcesources"
+
+  - interval: 1m
+    input_series:
+      - series: 'ssh_auth_metrics_collection_success{source="none",instance="monitoring-host:9100",job="node"}'
+        values: '0x20'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: SshAuthMetricsFailed
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              component: ssh
+              source: none
+              instance: monitoring-host:9100
+              job: node
+            exp_annotations:
+              summary: "Сбор метрик SSH-журнала не удался (monitoring-host:9100)"
+              description: "Нет читаемого journald или auth.log. Нулевой счётчик в этом случае не значит, что атак не было."
+              runbook: "docs/RUNBOOK.md#sshauthmetricsfailed"
+
+  - interval: 1m
+    input_series:
+      - series: 'node_textfile_mtime_seconds{file="/textfile/ssh_auth.prom",instance="monitoring-host:9100",job="node"}'
+        values: '0x30'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: SshAuthMetricsStale
+        exp_alerts: []
+      - eval_time: 20m
+        alertname: SshAuthMetricsStale
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              component: ssh
+              file: /textfile/ssh_auth.prom
+              instance: monitoring-host:9100
+              job: node
+            exp_annotations:
+              summary: "Файл метрик SSH не обновлялся дольше 10 минут"
+              description: "Таймер — 5 минут. Порог 10 минут — два пропуска плюс for 5 минут на подтверждение. Это не SLA."
+              runbook: "docs/RUNBOOK.md#sshauthmetricsstale"
+
+  - interval: 1m
+    input_series:
+      - series: 'up{job="prometheus",instance="localhost:9090"}'
+        values: '1x40'
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: SshAuthMetricsAbsent
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              component: ssh
+            exp_annotations:
+              summary: "Метрик SSH-журнала нет дольше 30 минут"
+              description: "Textfile не появился. Пока метрики нет, всплеск брутфорса этим стеком не виден."
+              runbook: "docs/RUNBOOK.md#sshauthmetricsabsent"
+
+  - interval: 1m
+    input_series:
+      - series: 'node_textfile_scrape_error{instance="monitoring-host:9100",job="node"}'
+        values: '1x20'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: NodeTextfileScrapeError
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              component: exporter
+              instance: monitoring-host:9100
+              job: node
+            exp_annotations:
+              summary: "node_exporter не смог прочитать textfile (monitoring-host:9100)"
+              description: "Каталог недоступен или .prom не разбирается. Битый файл не обновляет mtime, поэтому отдельный сигнал нужен."
+              runbook: "docs/RUNBOOK.md#nodetextfilescrapeerror"
+
+  - interval: 1m
+    input_series:
+      - series: 'up{job="prometheus",instance="localhost:9090"}'
+        values: '1x5'
+    alert_rule_test:
+      - eval_time: 1m
+        alertname: Watchdog
+        exp_alerts:
+          - exp_labels:
+              severity: none
+              component: pipeline
+            exp_annotations:
+              summary: "Сторожевой сигнал пайплайна алертов"
+              description: "Должен гореть всегда. Если погас — не доходят правила или Prometheus. Без webhook это только UI. На production роль требует vault_watchdog_webhook_url."
+              runbook: "docs/RUNBOOK.md#watchdog"
+
+  - interval: 1m
+    input_series:
+      - series: 'up{job="prometheus",instance="localhost:9090"}'
+        values: '1x40'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: MonitoringDockerUserMetricsAbsent
+        exp_alerts: []
+      - eval_time: 30m
+        alertname: MonitoringDockerUserMetricsAbsent
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              component: firewall
+              family: ipv4
+            exp_annotations:
+              summary: "Метрики правил DOCKER-USER нет дольше 30 минут"
+              description: "Файл docker_user.prom ни разу не появился или node_exporter его не отдал. Пока ряда нет, отказ скрипта не виден как applied=0."
+              runbook: "docs/RUNBOOK.md#monitoringdockerusermetricsabsent"
+
+  - interval: 1m
+    input_series:
+      - series: 'monitoring_docker_user_applied{family="ipv4",instance="monitoring-host:9100",job="node"}'
+        values: '0x20'
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: MonitoringDockerUserNotApplied
+        exp_alerts: []
+      - eval_time: 10m
+        alertname: MonitoringDockerUserNotApplied
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              component: firewall
+              family: ipv4
+              instance: monitoring-host:9100
+              job: node
+            exp_annotations:
+              summary: "Правила DOCKER-USER для прокси не записаны"
+              description: "Скрипт monitoring-docker-user.sh не смог обновить цепочку. Пока метрика 0, ограничение опубликованного порта не действует. 10 минут — два тика таймера, не SLA."
+              runbook: "docs/RUNBOOK.md#monitoringdockerusernotapplied"
+
+  - interval: 1m
+    input_series:
+      - series: 'node_textfile_mtime_seconds{file="/textfile/docker_user.prom",instance="monitoring-host:9100",job="node"}'
+        values: '0x30'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: MonitoringDockerUserStale
+        exp_alerts: []
+      - eval_time: 21m
+        alertname: MonitoringDockerUserStale
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              component: firewall
+              file: /textfile/docker_user.prom
+              instance: monitoring-host:9100
+              job: node
+            exp_annotations:
+              summary: "Файл метрик DOCKER-USER не обновлялся дольше 15 минут"
+              description: "Таймер — 5 минут. 15 минут — три пропуска. Без свежей метрики нельзя отличить живые правила от давно снятых."
+              runbook: "docs/RUNBOOK.md#monitoringdockeruserstale"

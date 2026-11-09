@@ -1,0 +1,385 @@
+---
+- name: Создать каталоги стека
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: root
+    group: "{{ item.group | default('root') }}"
+    mode: "{{ item.mode }}"
+  loop:
+    - path: "{{ monitoring_install_root }}/monitoring"
+      mode: "0755"
+    - path: "{{ monitoring_install_root }}/monitoring/prometheus/file_sd"
+      mode: "0755"
+    - path: "{{ monitoring_install_root }}/monitoring/alertmanager"
+      mode: "0755"
+    - path: "{{ monitoring_install_root }}/docker/secrets"
+      mode: "0750"
+      group: "{{ monitoring_proxy_gid }}"
+    - path: "{{ monitoring_install_root }}/docker/secrets/tls"
+      mode: "0750"
+      group: "{{ monitoring_proxy_gid }}"
+    - path: "{{ monitoring_install_root }}/docker/secrets/proxy"
+      mode: "0750"
+      group: "{{ monitoring_proxy_gid }}"
+  loop_control:
+    label: "{{ item.path }}"
+
+- name: Скопировать неизменяемые каталоги стека
+  ansible.builtin.import_tasks: layout_copy.yml
+  notify: Перечитать конфигурацию стека
+
+- name: Скопировать compose-файл
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../docker/compose.yaml"
+    dest: "{{ monitoring_install_root }}/docker/compose.yaml"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Перечитать конфигурацию стека
+
+- name: В production нужны получатели алертов
+  ansible.builtin.assert:
+    that:
+      - (vault_alertmanager_webhook_url | default('')) | length > 0
+      - "'REPLACE_ME' not in (vault_alertmanager_webhook_url | default(''))"
+      - (vault_watchdog_webhook_url | default('')) | length > 0
+      - "'REPLACE_ME' not in (vault_watchdog_webhook_url | default(''))"
+    fail_msg: >-
+      env=production требует vault_alertmanager_webhook_url и
+      vault_watchdog_webhook_url. Пустой receiver молча съедает алерты,
+      а Watchdog без внешнего получателя не сторожит смерть Prometheus.
+  when: (env | default('example')) == 'production'
+
+- name: Записать prometheus.yml
+  ansible.builtin.template:
+    src: prometheus.yml.j2
+    dest: "{{ monitoring_install_root }}/monitoring/prometheus/prometheus.yml"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Перечитать конфигурацию стека
+
+- name: Записать file_sd целей HTTP
+  ansible.builtin.template:
+    src: http_targets.yml.j2
+    dest: "{{ monitoring_install_root }}/monitoring/prometheus/file_sd/http_targets.yml"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Перечитать конфигурацию стека
+
+- name: Записать file_sd целей TLS
+  ansible.builtin.template:
+    src: tls_targets.yml.j2
+    dest: "{{ monitoring_install_root }}/monitoring/prometheus/file_sd/tls_targets.yml"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Перечитать конфигурацию стека
+
+- name: Записать конфигурацию Alertmanager
+  ansible.builtin.template:
+    src: alertmanager.yml.j2
+    dest: "{{ monitoring_install_root }}/monitoring/alertmanager/alertmanager.yml"
+    owner: root
+    group: "{{ monitoring_alertmanager_gid }}"
+    mode: "0640"
+  no_log: true
+  notify: Перечитать конфигурацию стека
+
+- name: Сгенерировать секреты и запустить compose
+  when: not ansible_check_mode
+  block:
+    - name: Проверить docker compose
+      ansible.builtin.command:
+        argv: [docker, compose, version]
+      register: monitoring_stack_compose_version
+      changed_when: false
+
+    - name: Прочитать сохранённый пароль Grafana
+      ansible.builtin.slurp:
+        src: "{{ monitoring_install_root }}/docker/secrets/grafana_admin_password"
+      register: monitoring_stack_grafana_slurp
+      failed_when: false
+      changed_when: false
+      no_log: true
+
+    - name: Прочитать сохранённый пароль nginx
+      ansible.builtin.slurp:
+        src: "{{ monitoring_install_root }}/docker/secrets/nginx_basic_auth_password"
+      register: monitoring_stack_nginx_slurp
+      failed_when: false
+      changed_when: false
+      no_log: true
+
+    - name: Прочитать соль htpasswd
+      ansible.builtin.slurp:
+        src: "{{ monitoring_install_root }}/docker/secrets/htpasswd.salt"
+      register: monitoring_stack_salt_slurp
+      failed_when: false
+      changed_when: false
+      no_log: true
+
+    - name: Выбрать пароль Grafana
+      ansible.builtin.set_fact:
+        monitoring_stack_grafana_password: >-
+          {{
+            vault_grafana_admin_password
+            if (
+              vault_grafana_admin_password is defined
+              and vault_grafana_admin_password | length > 0
+              and 'REPLACE_ME' not in vault_grafana_admin_password
+            )
+            else (
+              monitoring_stack_grafana_slurp.content | b64decode | trim
+              if monitoring_stack_grafana_slurp.content is defined
+              else ''
+            )
+          }}
+      no_log: true
+
+    - name: Сгенерировать пароль Grafana
+      ansible.builtin.command:
+        argv: [openssl, rand, -base64, "24"]
+      register: monitoring_stack_grafana_gen
+      changed_when: true
+      no_log: true
+      when: monitoring_stack_grafana_password | length == 0
+
+    - name: Зафиксировать сгенерированный пароль Grafana
+      ansible.builtin.set_fact:
+        monitoring_stack_grafana_password: "{{ monitoring_stack_grafana_gen.stdout | trim }}"
+      no_log: true
+      when: monitoring_stack_grafana_password | length == 0
+
+    - name: Сохранить пароль Grafana
+      ansible.builtin.copy:
+        dest: "{{ monitoring_install_root }}/docker/secrets/grafana_admin_password"
+        content: "{{ monitoring_stack_grafana_password }}\n"
+        owner: root
+        group: root
+        mode: "0600"
+      no_log: true
+      notify: Сбросить пароль администратора Grafana
+
+    - name: Выбрать пароль basic auth
+      ansible.builtin.set_fact:
+        monitoring_stack_basic_auth_password: >-
+          {{
+            vault_nginx_basic_auth_password
+            if (
+              vault_nginx_basic_auth_password is defined
+              and vault_nginx_basic_auth_password | length > 0
+              and 'REPLACE_ME' not in vault_nginx_basic_auth_password
+            )
+            else (
+              monitoring_stack_nginx_slurp.content | b64decode | trim
+              if monitoring_stack_nginx_slurp.content is defined
+              else ''
+            )
+          }}
+      no_log: true
+
+    - name: Сгенерировать пароль basic auth
+      ansible.builtin.command:
+        argv: [openssl, rand, -base64, "24"]
+      register: monitoring_stack_nginx_gen
+      changed_when: true
+      no_log: true
+      when: monitoring_stack_basic_auth_password | length == 0
+
+    - name: Зафиксировать сгенерированный пароль basic auth
+      ansible.builtin.set_fact:
+        monitoring_stack_basic_auth_password: "{{ monitoring_stack_nginx_gen.stdout | trim }}"
+      no_log: true
+      when: monitoring_stack_basic_auth_password | length == 0
+
+    - name: Сохранить пароль basic auth
+      ansible.builtin.copy:
+        dest: "{{ monitoring_install_root }}/docker/secrets/nginx_basic_auth_password"
+        content: "{{ monitoring_stack_basic_auth_password }}\n"
+        owner: root
+        group: root
+        mode: "0600"
+      no_log: true
+
+    - name: Выбрать соль htpasswd
+      ansible.builtin.set_fact:
+        monitoring_stack_htpasswd_salt: >-
+          {{
+            monitoring_stack_salt_slurp.content | b64decode | trim
+            if monitoring_stack_salt_slurp.content is defined
+            else ''
+          }}
+      no_log: true
+
+    - name: Сгенерировать соль htpasswd
+      ansible.builtin.command:
+        argv: [openssl, rand, -hex, "4"]
+      register: monitoring_stack_salt_gen
+      changed_when: true
+      no_log: true
+      when: monitoring_stack_htpasswd_salt | length == 0
+
+    - name: Зафиксировать соль htpasswd
+      ansible.builtin.set_fact:
+        monitoring_stack_htpasswd_salt: "{{ monitoring_stack_salt_gen.stdout | trim }}"
+      no_log: true
+      when: monitoring_stack_htpasswd_salt | length == 0
+
+    - name: Сохранить соль htpasswd
+      ansible.builtin.copy:
+        dest: "{{ monitoring_install_root }}/docker/secrets/htpasswd.salt"
+        content: "{{ monitoring_stack_htpasswd_salt }}\n"
+        owner: root
+        group: root
+        mode: "0600"
+      no_log: true
+
+    - name: Посчитать sha512-хеш basic auth
+      ansible.builtin.command:
+        argv:
+          - openssl
+          - passwd
+          - -6
+          - -salt
+          - "{{ monitoring_stack_htpasswd_salt }}"
+          - -stdin
+        stdin: "{{ monitoring_stack_basic_auth_password }}"
+      register: monitoring_stack_htpasswd_hash
+      changed_when: false
+      no_log: true
+
+    - name: Записать htpasswd
+      ansible.builtin.copy:
+        dest: "{{ monitoring_install_root }}/docker/secrets/proxy/htpasswd"
+        content: "monitoring:{{ monitoring_stack_htpasswd_hash.stdout }}\n"
+        owner: root
+        group: "{{ monitoring_proxy_gid }}"
+        mode: "0640"
+      no_log: true
+      notify: Перечитать конфигурацию стека
+
+    - name: Удалить файл webhook алертов, если URL пуст
+      ansible.builtin.file:
+        path: "{{ monitoring_install_root }}/monitoring/alertmanager/webhook-alert.url"
+        state: absent
+      when: (vault_alertmanager_webhook_url | default('')) | length == 0
+
+    - name: Удалить файл webhook Watchdog, если URL пуст
+      ansible.builtin.file:
+        path: "{{ monitoring_install_root }}/monitoring/alertmanager/webhook-watchdog.url"
+        state: absent
+      when: (vault_watchdog_webhook_url | default('')) | length == 0
+
+    - name: Записать URL webhook Alertmanager
+      ansible.builtin.copy:
+        dest: "{{ monitoring_install_root }}/monitoring/alertmanager/webhook-alert.url"
+        content: "{{ vault_alertmanager_webhook_url }}\n"
+        owner: root
+        group: "{{ monitoring_alertmanager_gid }}"
+        mode: "0640"
+      no_log: true
+      when:
+        - (vault_alertmanager_webhook_url | default('')) | length > 0
+        - "'REPLACE_ME' not in vault_alertmanager_webhook_url"
+      notify: Перечитать конфигурацию стека
+
+    - name: Записать URL webhook Watchdog
+      ansible.builtin.copy:
+        dest: "{{ monitoring_install_root }}/monitoring/alertmanager/webhook-watchdog.url"
+        content: "{{ vault_watchdog_webhook_url }}\n"
+        owner: root
+        group: "{{ monitoring_alertmanager_gid }}"
+        mode: "0640"
+      no_log: true
+      when:
+        - (vault_watchdog_webhook_url | default('')) | length > 0
+        - "'REPLACE_ME' not in vault_watchdog_webhook_url"
+      notify: Перечитать конфигурацию стека
+
+    - name: Выпустить сертификат прокси, если его ещё нет
+      ansible.builtin.command:
+        argv:
+          - openssl
+          - req
+          - -x509
+          - -nodes
+          - -newkey
+          - ec
+          - -pkeyopt
+          - ec_paramgen_curve:prime256v1
+          - -keyout
+          - "{{ monitoring_install_root }}/docker/secrets/tls/server.key"
+          - -out
+          - "{{ monitoring_install_root }}/docker/secrets/tls/server.crt"
+          - -days
+          - "90"
+          - -subj
+          - /CN=monitoring.example
+          - -addext
+          - subjectAltName=DNS:monitoring.example,DNS:localhost,IP:127.0.0.1
+        creates: "{{ monitoring_install_root }}/docker/secrets/tls/server.crt"
+      no_log: true
+      notify: Перечитать конфигурацию стека
+
+    - name: Выставить права ключа и сертификата
+      ansible.builtin.file:
+        path: "{{ item.path }}"
+        owner: root
+        group: "{{ item.group }}"
+        mode: "{{ item.mode }}"
+      loop:
+        - path: "{{ monitoring_install_root }}/docker/secrets/tls/server.key"
+          group: "{{ monitoring_proxy_gid }}"
+          mode: "0640"
+        - path: "{{ monitoring_install_root }}/docker/secrets/tls/server.crt"
+          group: root
+          mode: "0644"
+      loop_control:
+        label: "{{ item.path }}"
+
+    - name: Записать окружение compose
+      ansible.builtin.template:
+        src: compose.env.j2
+        dest: "{{ monitoring_install_root }}/docker/secrets/compose.env"
+        owner: root
+        group: root
+        mode: "0600"
+      no_log: true
+
+    - name: Проверить конфигурацию Prometheus перед запуском
+      ansible.builtin.command:
+        argv:
+          - docker
+          - run
+          - --rm
+          - --entrypoint
+          - promtool
+          - -v
+          - "{{ monitoring_install_root }}/monitoring/prometheus:/etc/prometheus:ro"
+          - "{{ monitoring_prometheus_image }}"
+          - check
+          - config
+          - /etc/prometheus/prometheus.yml
+      changed_when: false
+
+    - name: Запустить стек
+      ansible.builtin.command:
+        argv:
+          - docker
+          - compose
+          - --env-file
+          - "{{ monitoring_install_root }}/docker/secrets/compose.env"
+          - -f
+          - "{{ monitoring_install_root }}/docker/compose.yaml"
+          - up
+          - -d
+          - --remove-orphans
+      register: monitoring_stack_compose_up
+      changed_when: >-
+        'Created' in (monitoring_stack_compose_up.stdout | default('') ~ monitoring_stack_compose_up.stderr | default(''))
+        or 'Started' in (monitoring_stack_compose_up.stdout | default('') ~ monitoring_stack_compose_up.stderr | default(''))
+        or 'Recreated' in (monitoring_stack_compose_up.stdout | default('') ~ monitoring_stack_compose_up.stderr | default(''))
+        or 'Pulled' in (monitoring_stack_compose_up.stdout | default('') ~ monitoring_stack_compose_up.stderr | default(''))

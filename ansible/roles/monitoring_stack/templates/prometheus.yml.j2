@@ -1,0 +1,94 @@
+# Пример конфигурации Prometheus для лабораторного стенда.
+# Цели снаружи задаются file_sd, чтобы плейбук подменял их, не переписывая этот файл.
+# example.invalid — зарезервированное имя (RFC 2606), не боевой хост.
+# external label env подставляет плейбук из inventory.
+---
+global:
+  scrape_interval: 30s
+  scrape_timeout: 10s
+  evaluation_interval: 30s
+  external_labels:
+    monitor: security-lab
+    env: {{ env | default('example') }}
+
+rule_files:
+  - rules/*.yml
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets:
+            - alertmanager:9093
+
+scrape_configs:
+  - job_name: prometheus
+    static_configs:
+      - targets:
+          - localhost:9090
+
+  - job_name: alertmanager
+    static_configs:
+      - targets:
+          - alertmanager:9093
+
+  - job_name: node
+    static_configs:
+      - targets:
+          - node-exporter:9100
+        labels:
+          instance: monitoring-host
+
+  - job_name: blackbox
+    static_configs:
+      - targets:
+          - blackbox-exporter:9115
+
+  - job_name: blackbox-http
+    metrics_path: /probe
+    params:
+      module:
+        - http_2xx
+    file_sd_configs:
+      - files:
+          - /etc/prometheus/file_sd/http_targets.yml
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: blackbox-exporter:9115
+
+  - job_name: blackbox-tls
+    metrics_path: /probe
+    params:
+      module:
+        - tls_connect
+    file_sd_configs:
+      - files:
+          - /etc/prometheus/file_sd/tls_targets.yml
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: blackbox-exporter:9115
+
+  - job_name: blackbox-internal
+    metrics_path: /probe
+    params:
+      module:
+        - http_2xx
+    static_configs:
+      - targets:
+          - http://grafana:3000/api/health
+          - http://prometheus:9090/-/healthy
+          - http://alertmanager:9093/-/healthy
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: blackbox-exporter:9115

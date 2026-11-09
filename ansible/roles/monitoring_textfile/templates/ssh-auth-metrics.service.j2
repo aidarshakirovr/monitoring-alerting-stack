@@ -1,0 +1,24 @@
+[Unit]
+Description=Метрики неудачных SSH-входов для node_exporter
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+UMask=0022
+EnvironmentFile=/etc/monitoring/ssh-auth-metrics.env
+ExecStart=/usr/local/lib/monitoring/ssh-auth-metrics.sh
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+RestrictRealtime=true
+SystemCallArchitectures=native
+ReadWritePaths={{ monitoring_textfile_dir }}

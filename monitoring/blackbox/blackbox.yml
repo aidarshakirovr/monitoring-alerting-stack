@@ -1,0 +1,31 @@
+# Модули blackbox. insecure_skip_verify выключен: алерт по сертификату
+# не должен зеленеть из-за того, что проверку отключили.
+# http_2xx не следует редиректам: цель должна сама ответить 200 тем
+# scheme, который записан в file_sd.
+---
+modules:
+  http_2xx:
+    prober: http
+    timeout: 10s
+    http:
+      valid_http_versions:
+        - HTTP/1.1
+        - HTTP/2.0
+      valid_status_codes:
+        - 200
+      method: GET
+      follow_redirects: false
+      preferred_ip_protocol: ip4
+      ip_protocol_fallback: false
+      tls_config:
+        insecure_skip_verify: false
+
+  tls_connect:
+    prober: tcp
+    timeout: 10s
+    tcp:
+      preferred_ip_protocol: ip4
+      ip_protocol_fallback: false
+      tls: true
+      tls_config:
+        insecure_skip_verify: false

@@ -1,0 +1,20 @@
+---
+extends: default
+locale: en_US.UTF-8
+rules:
+  line-length:
+    max: 200
+    allow-non-breakable-words: true
+    allow-non-breakable-inline-mappings: true
+  truthy:
+    check-keys: false
+  comments:
+    min-spaces-from-content: 1
+  comments-indentation: false
+  document-start: enable
+  octal-values:
+    forbid-implicit-octal: true
+    forbid-explicit-octal: true
+  braces:
+    min-spaces-inside: 0
+    max-spaces-inside: 1

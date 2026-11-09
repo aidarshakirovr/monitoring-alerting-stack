@@ -1,0 +1,11 @@
+[Unit]
+Description=Правила DOCKER-USER и INPUT для портов мониторинга
+After=docker.service
+PartOf=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/monitoring-docker-user.sh
+
+[Install]
+WantedBy=docker.service

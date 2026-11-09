@@ -1,0 +1,12 @@
+[Unit]
+Description=Периодическая проверка возраста снапшота restic
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=15min
+AccuracySec=1min
+Persistent=true
+Unit=restic-textfile.service
+
+[Install]
+WantedBy=timers.target

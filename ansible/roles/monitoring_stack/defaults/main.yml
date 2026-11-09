@@ -1,0 +1,16 @@
+---
+monitoring_bind_ip: "127.0.0.1"
+monitoring_grafana_port: 8443
+monitoring_prometheus_port: 8444
+monitoring_alertmanager_port: 8445
+monitoring_install_root: /opt/monitoring-stack
+monitoring_proxy_gid: "101"
+monitoring_grafana_admin_user: admin
+monitoring_grafana_root_url: "https://127.0.0.1:8443"
+monitoring_textfile_dir: /var/lib/node_exporter/textfile
+monitoring_http_targets:
+  - https://example.invalid/health
+monitoring_tls_targets:
+  - example.invalid:443
+monitoring_prometheus_image: prom/prometheus:v3.16.0@sha256:e04987641b57704f408e31f6373ba4138ecf27cb4a165d24aabb6c38fddd0f06
+monitoring_alertmanager_gid: "65534"
