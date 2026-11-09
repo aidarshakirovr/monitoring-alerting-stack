@@ -1,0 +1,24 @@
+[Unit]
+Description=Метрики возраста снапшота restic для node_exporter
+After=network-online.target
+
+[Service]
+Type=oneshot
+User={{ monitoring_restic_user }}
+Group={{ monitoring_restic_group }}
+UMask=0022
+EnvironmentFile=/etc/monitoring/restic-textfile.env
+ExecStart=/usr/local/lib/monitoring/restic-textfile.sh
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+RestrictRealtime=true
+SystemCallArchitectures=native
+ReadWritePaths={{ monitoring_textfile_dir }} {{ monitoring_restic_cache_dir }}

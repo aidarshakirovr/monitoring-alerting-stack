@@ -1,0 +1,65 @@
+---
+- name: Убедиться, что /usr/local/sbin существует
+  ansible.builtin.file:
+    path: /usr/local/sbin
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Установить скрипт DOCKER-USER
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../scripts/monitoring-docker-user.sh"
+    dest: /usr/local/sbin/monitoring-docker-user.sh
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Создать /etc/monitoring
+  ansible.builtin.file:
+    path: /etc/monitoring
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Записать параметры DOCKER-USER
+  ansible.builtin.template:
+    src: docker-user.env.j2
+    dest: /etc/monitoring/docker-user.env
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Установить unit и timer DOCKER-USER
+  ansible.builtin.copy:
+    src: "{{ item }}"
+    dest: "/etc/systemd/system/{{ item }}"
+    owner: root
+    group: root
+    mode: "0644"
+  loop:
+    - monitoring-docker-user.service
+    - monitoring-docker-user.timer
+
+- name: Включить таймер DOCKER-USER
+  ansible.builtin.systemd:
+    name: monitoring-docker-user.timer
+    enabled: true
+    state: started
+    daemon_reload: true
+  when: not ansible_check_mode
+
+- name: Разрешить порты прокси в UFW только с указанных сетей
+  community.general.ufw:
+    rule: allow
+    src: "{{ item.0 }}"
+    port: "{{ item.1 | string }}"
+    proto: tcp
+    comment: monitoring-proxy
+  loop: "{{ monitoring_allow_cidrs | product([monitoring_grafana_port, monitoring_prometheus_port, monitoring_alertmanager_port]) | list }}"
+  when:
+    - monitoring_ufw_enabled | bool
+    - monitoring_bind_ip != '127.0.0.1'
+  loop_control:
+    label: "{{ item.0 }}:{{ item.1 }}"

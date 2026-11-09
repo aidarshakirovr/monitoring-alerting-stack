@@ -1,0 +1,16 @@
+---
+profile: moderate
+strict: true
+exclude_paths:
+  - .github/
+  - docs/
+  - monitoring/
+  - docker/
+  - tests/
+  - requirements.txt
+skip_list:
+  - yaml[line-length]
+  # Общие имена monitoring_* живут в group_vars и в нескольких ролях сразу.
+  # Префикс одной роли их бы разъехал: firewall и stack смотрят на один bind.
+  - var-naming[no-role-prefix]
+verbosity: 1

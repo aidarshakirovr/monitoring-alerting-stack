@@ -1,0 +1,5 @@
+---
+- targets:
+    - example.invalid:443
+  labels:
+    env: example

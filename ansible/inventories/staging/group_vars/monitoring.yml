@@ -1,0 +1,4 @@
+---
+# Staging наследует ansible/group_vars/all/main.yml.
+# Цели example.invalid оставлены специально: без подмены проб стенд
+# покажет HttpEndpointDown, а не будет тихо ходить на чужой домен.

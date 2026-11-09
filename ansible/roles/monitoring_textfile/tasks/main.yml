@@ -1,0 +1,137 @@
+---
+- name: Установить python3 для разбора времени и журналов
+  ansible.builtin.package:
+    name: python3
+    state: present
+
+- name: Создать группу каталога textfile
+  ansible.builtin.group:
+    name: monitoring-textfile
+    system: true
+
+- name: Создать каталог textfile
+  ansible.builtin.file:
+    path: "{{ monitoring_textfile_dir }}"
+    state: directory
+    owner: root
+    group: monitoring-textfile
+    mode: "2775"
+
+- name: Создать каталог скриптов
+  ansible.builtin.file:
+    path: /usr/local/lib/monitoring
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Установить скрипты textfile
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../scripts/{{ item }}"
+    dest: "/usr/local/lib/monitoring/{{ item }}"
+    owner: root
+    group: root
+    mode: "0755"
+  loop:
+    - restic-textfile.sh
+    - ssh-auth-metrics.sh
+
+- name: Создать /etc/monitoring
+  ansible.builtin.file:
+    path: /etc/monitoring
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Записать окружение сборщика SSH
+  ansible.builtin.template:
+    src: ssh-auth-metrics.env.j2
+    dest: /etc/monitoring/ssh-auth-metrics.env
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Установить unit и timer сборщика SSH
+  ansible.builtin.template:
+    src: "{{ item.src }}"
+    dest: "/etc/systemd/system/{{ item.dest }}"
+    owner: root
+    group: root
+    mode: "0644"
+  loop:
+    - src: ssh-auth-metrics.service.j2
+      dest: ssh-auth-metrics.service
+    - src: ssh-auth-metrics.timer.j2
+      dest: ssh-auth-metrics.timer
+
+- name: Включить таймер сборщика SSH
+  ansible.builtin.systemd:
+    name: ssh-auth-metrics.timer
+    enabled: true
+    state: started
+    daemon_reload: true
+  when: not ansible_check_mode
+
+- name: Проверить пользователя restic
+  ansible.builtin.getent:
+    database: passwd
+    key: "{{ monitoring_restic_user }}"
+  register: monitoring_textfile_restic_passwd
+  failed_when: false
+
+- name: Сообщить, что таймер restic не включён
+  ansible.builtin.debug:
+    msg: >-
+      Пользователь {{ monitoring_restic_user }} не найден.
+      Таймер restic-textfile не включён. Пока нет файла метрик,
+      будет алерт ResticMetricsAbsent. Пользователя создаёт роль
+      backup_restic в репозитории test-task-sys-admin-infr-engineer,
+      либо задайте monitoring_restic_user.
+  when: monitoring_textfile_restic_passwd is failed
+
+- name: Подготовить таймер restic
+  when: monitoring_textfile_restic_passwd is succeeded
+  block:
+    - name: Добавить пользователя restic в группу textfile
+      ansible.builtin.user:
+        name: "{{ monitoring_restic_user }}"
+        groups: monitoring-textfile
+        append: true
+
+    - name: Создать кэш restic для чтения снапшотов
+      ansible.builtin.file:
+        path: "{{ monitoring_restic_cache_dir }}"
+        state: directory
+        owner: "{{ monitoring_restic_user }}"
+        group: "{{ monitoring_restic_group }}"
+        mode: "0750"
+
+    - name: Записать окружение проверки restic
+      ansible.builtin.template:
+        src: restic-textfile.env.j2
+        dest: /etc/monitoring/restic-textfile.env
+        owner: root
+        group: root
+        mode: "0640"
+
+    - name: Установить unit и timer restic
+      ansible.builtin.template:
+        src: "{{ item.src }}"
+        dest: "/etc/systemd/system/{{ item.dest }}"
+        owner: root
+        group: root
+        mode: "0644"
+      loop:
+        - src: restic-textfile.service.j2
+          dest: restic-textfile.service
+        - src: restic-textfile.timer.j2
+          dest: restic-textfile.timer
+
+    - name: Включить таймер restic
+      ansible.builtin.systemd:
+        name: restic-textfile.timer
+        enabled: true
+        state: started
+        daemon_reload: true
+      when: not ansible_check_mode

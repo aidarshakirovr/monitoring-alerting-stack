@@ -1,0 +1,13 @@
+---
+# Скопировать в vault.yml и зашифровать:
+#   cp ansible/group_vars/all/vault.yml.example ansible/group_vars/all/vault.yml
+#   ansible-vault encrypt ansible/group_vars/all/vault.yml
+#
+# Строки REPLACE_ME роль не применяет: вместо них пароль будет сгенерирован
+# на хосте и записан в /opt/monitoring-stack/docker/secrets/ (режим 0600).
+# Пустой webhook означает пустой receiver: Alertmanager никуда не ходит.
+
+vault_grafana_admin_password: "REPLACE_ME_VIA_ANSIBLE_VAULT"
+vault_nginx_basic_auth_password: "REPLACE_ME_VIA_ANSIBLE_VAULT"
+vault_alertmanager_webhook_url: ""
+vault_watchdog_webhook_url: ""

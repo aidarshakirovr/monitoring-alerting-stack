@@ -1,0 +1,285 @@
+# Имена алертов на английском: это ключи route и якоря runbook.
+# Текст для человека — на русском. Числа обоснованы в docs/ARCHITECTURE.md,
+# раздел «Пороги». Это не SLA и не результат замера на стенде.
+---
+groups:
+  - name: availability
+    rules:
+      - alert: ExporterDown
+        expr: up{job=~"node|blackbox|prometheus|alertmanager"} == 0
+        for: 5m
+        labels:
+          severity: critical
+          component: exporter
+        annotations:
+          summary: "Экспортер {{ $labels.job }} недоступен ({{ $labels.instance }})"
+          description: "Scrape не удаётся дольше 5 минут. Интервал scrape — 30 секунд, поэтому порог — около десяти неудач подряд, а не один обрыв. Это не SLA."
+          runbook: "docs/RUNBOOK.md#exporterdown"
+
+      - alert: MonitoringComponentUnhealthy
+        expr: probe_success{job="blackbox-internal"} == 0
+        for: 5m
+        labels:
+          severity: critical
+          component: probe
+        annotations:
+          summary: "Внутренний health-check не проходит ({{ $labels.instance }})"
+          description: "Blackbox не получает HTTP 200 с Grafana, Prometheus или Alertmanager внутри сети Docker. Это не проверка внешнего сайта."
+          runbook: "docs/RUNBOOK.md#monitoringcomponentunhealthy"
+
+  - name: disk
+    rules:
+      - alert: DiskSpaceLow
+        expr: |
+          (
+            node_filesystem_avail_bytes{fstype!~"tmpfs|overlay|squashfs|aufs|devtmpfs|ramfs|fuse.*"}
+            /
+            node_filesystem_size_bytes{fstype!~"tmpfs|overlay|squashfs|aufs|devtmpfs|ramfs|fuse.*"}
+          ) < 0.15
+          and
+          (
+            node_filesystem_avail_bytes{fstype!~"tmpfs|overlay|squashfs|aufs|devtmpfs|ramfs|fuse.*"}
+            /
+            node_filesystem_size_bytes{fstype!~"tmpfs|overlay|squashfs|aufs|devtmpfs|ramfs|fuse.*"}
+          ) >= 0.05
+          and
+          node_filesystem_readonly{fstype!~"tmpfs|overlay|squashfs|aufs|devtmpfs|ramfs|fuse.*"} == 0
+        for: 15m
+        labels:
+          severity: warning
+          component: disk
+        annotations:
+          summary: "Мало свободного места на {{ $labels.mountpoint }} ({{ $labels.instance }})"
+          description: "Свободная доля ниже 15% и не ниже 5% дольше 15 минут. Доля, а не гигабайты: размер диска в этом репозитории не фиксирован. Это не SLA."
+          runbook: "docs/RUNBOOK.md#diskspacelow"
+
+      - alert: DiskSpaceCritical
+        expr: |
+          (
+            node_filesystem_avail_bytes{fstype!~"tmpfs|overlay|squashfs|aufs|devtmpfs|ramfs|fuse.*"}
+            /
+            node_filesystem_size_bytes{fstype!~"tmpfs|overlay|squashfs|aufs|devtmpfs|ramfs|fuse.*"}
+          ) < 0.05
+          and
+          node_filesystem_readonly{fstype!~"tmpfs|overlay|squashfs|aufs|devtmpfs|ramfs|fuse.*"} == 0
+        for: 5m
+        labels:
+          severity: critical
+          component: disk
+        annotations:
+          summary: "Место на {{ $labels.mountpoint }} почти закончилось ({{ $labels.instance }})"
+          description: "Свободно меньше 5% дольше 5 минут. Диск может заполниться быстрее этого окна — алерт тогда опоздает. Это не SLA."
+          runbook: "docs/RUNBOOK.md#diskspacecritical"
+
+      - alert: DiskInodesLow
+        expr: |
+          (
+            node_filesystem_files_free{fstype!~"tmpfs|overlay|squashfs|aufs|devtmpfs|ramfs|fuse.*"}
+            /
+            node_filesystem_files{fstype!~"tmpfs|overlay|squashfs|aufs|devtmpfs|ramfs|fuse.*"}
+          ) < 0.10
+        for: 15m
+        labels:
+          severity: warning
+          component: disk
+        annotations:
+          summary: "Мало свободных inode на {{ $labels.mountpoint }} ({{ $labels.instance }})"
+          description: "Свободных inode меньше 10% дольше 15 минут. Запись может сломаться при свободных байтах. Это не SLA."
+          runbook: "docs/RUNBOOK.md#diskinodeslow"
+
+      - alert: FilesystemReadOnly
+        expr: node_filesystem_readonly{fstype!~"tmpfs|overlay|squashfs|aufs|devtmpfs|ramfs|fuse.*"} == 1
+        for: 5m
+        labels:
+          severity: critical
+          component: disk
+        annotations:
+          summary: "Файловая система {{ $labels.mountpoint }} только для чтения ({{ $labels.instance }})"
+          description: "Ядро перемонтировало ФС в ro или она смонтирована так дольше 5 минут. Часто это ошибки диска, а не плановая политика."
+          runbook: "docs/RUNBOOK.md#filesystemreadonly"
+
+  - name: probes
+    rules:
+      - alert: HttpEndpointDown
+        expr: probe_success{job="blackbox-http"} == 0
+        for: 5m
+        labels:
+          severity: critical
+          component: probe
+        annotations:
+          summary: "Внешний HTTP-endpoint недоступен ({{ $labels.instance }})"
+          description: "Blackbox не получил ожидаемый ответ дольше 5 минут. Модуль http_2xx не следует редиректам и не отключает проверку TLS."
+          runbook: "docs/RUNBOOK.md#httpendpointdown"
+
+      - alert: TlsCertificateExpiresSoon
+        expr: |
+          (probe_ssl_earliest_cert_expiry{job="blackbox-tls"} - time()) < 14 * 24 * 3600
+          and
+          (probe_ssl_earliest_cert_expiry{job="blackbox-tls"} - time()) >= 3 * 24 * 3600
+        for: 1h
+        labels:
+          severity: warning
+          component: tls
+        annotations:
+          summary: "TLS-сертификат {{ $labels.instance }} истекает меньше чем через 14 дней"
+          description: "14 дней — запас после типичного автопродления на 30-м дне у сертификата на 90 дней. Если продление ручное и сертификат годовой, порог надо поднять. Это не SLA."
+          runbook: "docs/RUNBOOK.md#tlscertificateexpiressoon"
+
+      - alert: TlsCertificateExpiresCriticallySoon
+        expr: (probe_ssl_earliest_cert_expiry{job="blackbox-tls"} - time()) < 3 * 24 * 3600
+        for: 15m
+        labels:
+          severity: critical
+          component: tls
+        annotations:
+          summary: "TLS-сертификат {{ $labels.instance }} истекает меньше чем через 3 дня"
+          description: "3 дня оставляют будний цикл на ручную замену и не переживают длинные выходные без человека. Это не SLA."
+          runbook: "docs/RUNBOOK.md#tlscertificateexpirescriticallysoon"
+
+      - alert: TlsProbeFailed
+        expr: probe_success{job="blackbox-tls"} == 0
+        for: 5m
+        labels:
+          severity: critical
+          component: tls
+        annotations:
+          summary: "TLS-проверка {{ $labels.instance }} не выполняется"
+          description: "Рукопожатие не удалось, срок сертификата неизвестен. insecure_skip_verify в модуле выключен специально."
+          runbook: "docs/RUNBOOK.md#tlsprobefailed"
+
+  - name: restic
+    rules:
+      - alert: ResticSnapshotOlderThanRPO
+        expr: restic_snapshot_age_seconds > restic_rpo_threshold_seconds
+        for: 15m
+        labels:
+          severity: critical
+          component: restic
+        annotations:
+          summary: "Снапшот restic старше порога RPO ({{ $labels.repo }})"
+          description: "Порог пишет скрипт: RPO (по умолчанию 4 часа из репозитория backup) плюс grace 1 час. for 15 минут — два цикла textfile, а не SLA."
+          runbook: "docs/RUNBOOK.md#resticsnapshotolderthanrpo"
+
+      - alert: ResticSnapshotCheckFailed
+        expr: restic_snapshot_check_success == 0
+        for: 10m
+        labels:
+          severity: critical
+          component: restic
+        annotations:
+          summary: "Проверка снапшота restic не удалась ({{ $labels.repo }})"
+          description: "Скрипт не смог прочитать снапшот: нет restic, пароля, репозитория или список пуст. Возраст в этом случае неизвестен."
+          runbook: "docs/RUNBOOK.md#resticsnapshotcheckfailed"
+
+      - alert: ResticTextfileStale
+        expr: (time() - node_textfile_mtime_seconds{file=~".*restic_snapshot\\.prom"}) > 1800
+        for: 5m
+        labels:
+          severity: warning
+          component: restic
+        annotations:
+          summary: "Файл метрик restic не обновлялся дольше 30 минут"
+          description: "Таймер — 15 минут. 30 минут — два пропуска. Застывший возраст выглядит здоровым, поэтому смотрим mtime. Это не SLA."
+          runbook: "docs/RUNBOOK.md#restictextfilestale"
+
+      - alert: ResticMetricsAbsent
+        expr: absent(restic_snapshot_check_success)
+        for: 30m
+        labels:
+          severity: critical
+          component: restic
+        annotations:
+          summary: "Метрик restic нет дольше 30 минут"
+          description: "Textfile не появился или node_exporter его не отдал. Если restic на этом хосте не нужен, алерт надо убрать, а не заглушать молча."
+          runbook: "docs/RUNBOOK.md#resticmetricsabsent"
+
+  - name: ssh
+    rules:
+      - alert: SshAuthFailuresHigh
+        expr: ssh_auth_failures_last_window > 20
+        for: 15m
+        labels:
+          severity: warning
+          component: ssh
+        annotations:
+          summary: "Много неудачных SSH-входов ({{ $labels.instance }})"
+          description: "Больше 20 неудач в окне скрипта (по умолчанию 15 минут) и это держится 15 минут. Порог — эвристика, не базовая линия с этого хоста."
+          runbook: "docs/RUNBOOK.md#sshauthfailureshigh"
+
+      - alert: SshAuthFailuresCritical
+        expr: ssh_auth_failures_last_window > 100
+        for: 10m
+        labels:
+          severity: critical
+          component: ssh
+        annotations:
+          summary: "Очень много неудачных SSH-входов ({{ $labels.instance }})"
+          description: "Больше 100 неудач в окне. Для словаря это мало, для опечатки человека — много. Подстройте после недели графика, не до."
+          runbook: "docs/RUNBOOK.md#sshauthfailurescritical"
+
+      - alert: SshBruteforceSources
+        expr: ssh_auth_failure_unique_sources_last_window > 15
+        for: 15m
+        labels:
+          severity: warning
+          component: ssh
+        annotations:
+          summary: "Неудачные SSH-входы с многих адресов ({{ $labels.instance }})"
+          description: "Больше 15 разных адресов в окне. Один клиент так не выглядит. На хосте в интернете фон сканеров может быть выше — это не SLA."
+          runbook: "docs/RUNBOOK.md#sshbruteforcesources"
+
+      - alert: SshAuthMetricsFailed
+        expr: ssh_auth_metrics_collection_success == 0
+        for: 10m
+        labels:
+          severity: warning
+          component: ssh
+        annotations:
+          summary: "Сбор метрик SSH-журнала не удался ({{ $labels.instance }})"
+          description: "Нет читаемого journald или auth.log. Нулевой счётчик в этом случае не значит, что атак не было."
+          runbook: "docs/RUNBOOK.md#sshauthmetricsfailed"
+
+      - alert: SshAuthMetricsStale
+        expr: (time() - node_textfile_mtime_seconds{file=~".*ssh_auth\\.prom"}) > 600
+        for: 5m
+        labels:
+          severity: warning
+          component: ssh
+        annotations:
+          summary: "Файл метрик SSH не обновлялся дольше 10 минут"
+          description: "Таймер — 5 минут. Порог 10 минут — два пропуска плюс for 5 минут на подтверждение. Это не SLA."
+          runbook: "docs/RUNBOOK.md#sshauthmetricsstale"
+
+      - alert: SshAuthMetricsAbsent
+        expr: absent(ssh_auth_metrics_collection_success)
+        for: 30m
+        labels:
+          severity: warning
+          component: ssh
+        annotations:
+          summary: "Метрик SSH-журнала нет дольше 30 минут"
+          description: "Textfile не появился. Пока метрики нет, всплеск брутфорса этим стеком не виден."
+          runbook: "docs/RUNBOOK.md#sshauthmetricsabsent"
+
+      - alert: NodeTextfileScrapeError
+        expr: node_textfile_scrape_error == 1
+        for: 10m
+        labels:
+          severity: warning
+          component: exporter
+        annotations:
+          summary: "node_exporter не смог прочитать textfile ({{ $labels.instance }})"
+          description: "Каталог недоступен или .prom не разбирается. Битый файл не обновляет mtime, поэтому отдельный сигнал нужен."
+          runbook: "docs/RUNBOOK.md#nodetextfilescrapeerror"
+
+  - name: pipeline
+    rules:
+      - alert: Watchdog
+        expr: vector(1)
+        labels:
+          severity: none
+          component: pipeline
+        annotations:
+          summary: "Сторожевой сигнал пайплайна алертов"
+          description: "Должен гореть всегда. Если погас — не доходят правила, Prometheus или маршрут. Не страница для человека, пока приёмник watchdog пустой."
+          runbook: "docs/RUNBOOK.md#watchdog"

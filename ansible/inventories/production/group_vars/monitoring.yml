@@ -1,0 +1,10 @@
+---
+# Пример инвентаря. Bind по умолчанию остаётся 127.0.0.1, даже в этом файле:
+# открывать порт на 192.168.10.20 нужно явным решением вместе с allow CIDR.
+# monitoring_bind_ip: "192.168.10.20"
+# monitoring_allow_cidrs:
+#   - 192.168.10.0/24
+# monitoring_http_targets:
+#   - https://example.invalid/health
+# monitoring_tls_targets:
+#   - example.invalid:443
