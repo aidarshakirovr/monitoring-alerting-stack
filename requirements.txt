@@ -1,4 +1,4 @@
 # Линтеры для CI и scripts/ci-local.sh. Не зависимости рантайма стенда.
-ansible-core==2.21.6
+ansible-core==2.22.0
 ansible-lint==26.11.0
 yamllint==1.38.0
