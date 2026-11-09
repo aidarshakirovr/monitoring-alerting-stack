@@ -96,6 +96,39 @@ bash scripts/ci-local.sh
 
 Образы закреплены тегом и digest: Prometheus `v3.16.0`, Alertmanager `v0.34.2`, Grafana `13.3.0`, node_exporter `v1.12.1`, blackbox_exporter `v0.29.1`, nginx-unprivileged `1.29.8-alpine`. Digest снят с манифеста, который скачала эта среда; на другой архитектуре его нужно сверить.
 
+## Проверено вживую
+
+Дата: 2026-11-09, эта ВМ. Это не прод. Пароли создал `scripts/bootstrap-local-secrets.sh`. Каталог `docker/secrets/` в git не входит.
+
+Стек поднят так:
+
+```bash
+bash scripts/bootstrap-local-secrets.sh
+docker compose --env-file docker/secrets/compose.env -f docker/compose.yaml up -d
+```
+
+`ansible-playbook -i ansible/inventories/staging/hosts.ini ansible/site.yml` остановился на таймере SSH: PID 1 здесь tini, не systemd (`System has not been booted with systemd`). Роли стека и firewall плейбук не выполнял. Таймеры, journald и настоящий restic не проверялись.
+
+`node_exporter` сначала не стартовал: `/` был `private`, bind `rslave` из compose демону не подошёл. На ВМ выполнен `mount --make-rshared /`. В репозиторий это не входит. После этого контейнеры healthy. С хоста слушают только `127.0.0.1:8443`, `:8444`, `:8445`. Без пароля Grafana, Prometheus и Alertmanager отвечают 401, `/healthz` — 200. `http://127.0.0.1:9090` с хоста не открывается.
+
+Между контейнерами трафик сначала не ходил. У `iptables-legacy` политика FORWARD была DROP и цепочки знали только `docker0`, а Docker 29 пишет правила в iptables-nft. Чтобы scrape заработал, на ВМ выставлено `iptables-legacy -P FORWARD ACCEPT`. Этого нет в репозитории, и это не доказательство DROP в `DOCKER-USER`.
+
+До остановки `node_exporter` API Prometheus показал 9 активных target, все `up`: prometheus, alertmanager, node, blackbox, blackbox-http, blackbox-internal (три health) и blackbox-tls. Групп правил 7, правил 25, у всех `health=ok`. Alertmanager `0.34.2`, `/-/ready` ответил 200, cluster disabled. `probe_success` равен 1 для `http://grafana:3000/api/health`, `http://prometheus:9090/-/healthy` и `http://alertmanager:9093/-/healthy`. Для `https://example.invalid/health` и `example.invalid:443` он равен 0. `HttpEndpointDown` и `TlsProbeFailed` дошли до FIRING. Для этих целей так и задумано.
+
+Grafana открывается, дашборд «Мониторинг и безопасность» рисует панели. На конфигурации `main` без правки ниже панели были «Error loading»: общий `limit_req` (10 r/s, burst 40) отдал 503 на десятки `GET /public/build/*.js`, включая модули text, stat и timeseries. Статика Grafana вынесена в зону `assets`. После перезапуска прокси панели с данными. «No data» остались у срока TLS, возраста restic и неудачных SSH: этих рядов на ВМ нет.
+
+Тестовый алерт: `docker stop monitoring-node-exporter` в 10:24 UTC. `ExporterDown` (job `node`, instance `monitoring-host`) в 10:24 был pending, в 10:29 UTC стал FIRING. Alertmanager принял его со временем `2026-11-09T10:29:27.217Z`. После снимков контейнер снова запущен. Сами загорелись `ResticMetricsAbsent` и `SshAuthMetricsAbsent`: таймеры плейбук не поставил. `Watchdog` горит всегда.
+
+`scripts/monitoring-docker-user.sh` завершился с кодом 0. Цепочки записаны в iptables-nft и в ip6tables. После `curl` на `127.0.0.1` счётчики INPUT `mon-in-allow` были 6, 5 и 4 пакета на портах 8443, 8444 и 8445. Счётчики DROP остались 0: клиент только loopback, bind `127.0.0.1`. Правила `DOCKER-USER` с `--ctorigdstport` остались на 0 пакетов. Опубликованный порт принимает docker-proxy, и такой пакет идёт в INPUT. Сама цепочка `DOCKER-USER` при этом видела другой forwarded-трафик и отпускала его в RETURN. В iptables-legacy `DOCKER-USER` пустая: `iptables` указывает на nft, скрипт legacy не менял. Счётчики IPv6 остались 0, отдельных пакетов на `::1` не отправлял. Подменять источник, чтобы накрутить DROP или `--ctorigdst`, не стал.
+
+![Дашборд Grafana](docs/screenshots/grafana-dashboard.webp)
+
+![Targets Prometheus, node и blackbox в состоянии up](docs/screenshots/prometheus-targets.webp)
+
+![ExporterDown в состоянии FIRING](docs/screenshots/prometheus-exporterdown-firing.webp)
+
+![ExporterDown в Alertmanager](docs/screenshots/alertmanager-exporterdown.webp)
+
 ## Документы
 
 - [Архитектура и пороги](docs/ARCHITECTURE.md)
