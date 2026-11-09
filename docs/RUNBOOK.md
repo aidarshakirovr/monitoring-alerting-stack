@@ -290,6 +290,17 @@ sudo tail -n 200 /var/log/auth.log
 
 **Не делать.** Не выключать textfile collector: вместе с ним пропадут restic и SSH.
 
+<a id="monitoringdockerusermetricsabsent"></a>
+## MonitoringDockerUserMetricsAbsent
+
+**Что значит.** Ряда `monitoring_docker_user_applied{family="ipv4"}` нет 30 минут. Скрипт ни разу не записал textfile, поэтому алерт «applied=0» не из чего зажечь.
+
+**Как проверить.** `systemctl status monitoring-docker-user.timer`, каталог `/var/lib/node_exporter/textfile`.
+
+**Как исправить.** Запустить юнит и прочитать ошибку. Если Docker ещё не создал `DOCKER-USER`, дождаться демона: следующий тик или `PartOf=docker.service` запустит скрипт снова.
+
+**Не делать.** Не писать руками `applied 1`.
+
 <a id="monitoringdockerusernotapplied"></a>
 ## MonitoringDockerUserNotApplied
 

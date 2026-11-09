@@ -1,0 +1,21 @@
+---
+# Тот же playbook_dir, что у site.yml: роль копирует {{ playbook_dir }}/../monitoring.
+- name: Проверить, что copy не вкладывает каталог сам в себя
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    monitoring_install_root: "{{ lookup('env', 'LAYOUT_ROOT') }}"
+    monitoring_proxy_gid: "101"
+  tasks:
+    - name: Родительские каталоги, как в роли
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        mode: "0755"
+      loop:
+        - "{{ monitoring_install_root }}/monitoring"
+        - "{{ monitoring_install_root }}/monitoring/prometheus/file_sd"
+
+    - name: Скопировать так же, как monitoring_stack
+      ansible.builtin.import_tasks: roles/monitoring_stack/tasks/layout_copy.yml

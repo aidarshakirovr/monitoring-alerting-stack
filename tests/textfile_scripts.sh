@@ -147,19 +147,63 @@ if grep -q -- '-900 seconds ago' "${args_file}"; then
   exit 1
 fi
 
+echo "== restic: дробные секунды из 2 и 4 знаков =="
+for frac in 12 1234; do
+  fracdir="${WORK}/frac-${frac}"
+  mkdir -p "${fracdir}"
+  fixture="${fracdir}/snap.json"
+  printf '[{"time":"2026-11-09T06:00:00.%s+00:00","hostname":"app","paths":["/srv/app/data"],"short_id":"f"}]\n' "${frac}" > "${fixture}"
+  TEXTFILE_DIR="${fracdir}" \
+    REPO_LABEL=primary \
+    RPO_HOURS=4 \
+    RPO_GRACE_HOURS=1 \
+    RESTIC_METRICS_NOW_EPOCH="${NOW}" \
+    RESTIC_METRICS_FIXTURE="${fixture}" \
+    bash "${ROOT}/scripts/restic-textfile.sh"
+  expect_line "${fracdir}/restic_snapshot.prom" 'restic_snapshot_age_seconds{repo="primary"} 7200'
+done
+
 echo "== DOCKER-USER dry-run =="
 plan="$(MONITORING_DOCKER_USER_ENV=/dev/null MONITORING_BIND_IP=192.0.2.10 bash "${ROOT}/scripts/monitoring-docker-user.sh" --dry-run)"
-grep -q 'iptables -I DOCKER-USER 1 -p tcp -m conntrack --ctdir ORIGINAL --ctorigdst 192.0.2.10 --ctorigdstport 8443 -m comment --comment mon-drop-8443 -j DROP' <<< "${plan}"
-grep -q 'iptables -I DOCKER-USER 1 -p tcp -s 127.0.0.0/8 -m conntrack --ctdir ORIGINAL --ctorigdst 192.0.2.10 --ctorigdstport 8443 .* -j RETURN' <<< "${plan}"
-grep -q 'iptables -I INPUT 1 -p tcp -d 192.0.2.10 -m conntrack --ctstate NEW --dport 8443 -m comment --comment mon-in-drop-8443 -j DROP' <<< "${plan}"
-if grep -E 'DOCKER-USER .* --dport ' <<< "${plan}"; then
-  echo "[FAIL] DOCKER-USER всё ещё матчит dport после DNAT" >&2
+grep -q 'iptables-restore --noflush' <<< "${plan}"
+grep -q -- '-A MONITORING-PROXY-FWD -p tcp -s 127.0.0.0/8 -m conntrack --ctdir ORIGINAL --ctorigdst 192.0.2.10 --ctorigdstport 8443 ' <<< "${plan}"
+grep -q -- '-A MONITORING-PROXY-FWD -p tcp -m conntrack --ctdir ORIGINAL --ctorigdst 192.0.2.10 --ctorigdstport 8443 ' <<< "${plan}"
+grep -q 'iptables -I DOCKER-USER 1 -j MONITORING-PROXY-FWD' <<< "${plan}"
+grep -q 'iptables -I INPUT 1 -j MONITORING-PROXY-IN' <<< "${plan}"
+allow_at="$(grep -n 'mon-allow-8443-127.0.0.0_8 -j RETURN' <<< "${plan}" | head -1 | cut -d: -f1)"
+drop_at="$(grep -n 'mon-drop-8443 -j DROP' <<< "${plan}" | head -1 | cut -d: -f1)"
+[[ -n "${allow_at}" && -n "${drop_at}" && "${allow_at}" -lt "${drop_at}" ]]
+if grep -E -- '-D DOCKER-USER|-F DOCKER-USER' <<< "${plan}"; then
+  echo "[FAIL] план сначала снимает фильтр" >&2
   exit 1
 fi
-if grep -E -- '-A DOCKER-USER' <<< "${plan}"; then
-  echo "[FAIL] DROP добавлен через -A и может оказаться после RETURN" >&2
-  exit 1
+
+echo "== DOCKER-USER: сбой restore не ставит applied=1 =="
+fakebin="${WORK}/fake-iptables"
+mkdir -p "${fakebin}"
+cat > "${fakebin}/iptables" <<'EOF'
+#!/bin/sh
+if [ "$1" = "-nL" ]; then
+  exit 0
 fi
+exit 0
+EOF
+cat > "${fakebin}/iptables-restore" <<'EOF'
+#!/bin/sh
+exit 1
+EOF
+chmod 0755 "${fakebin}/iptables" "${fakebin}/iptables-restore"
+metricdir="${WORK}/docker-user-metric"
+mkdir -p "${metricdir}"
+set +e
+PATH="${fakebin}:${PATH}" \
+  MONITORING_DOCKER_USER_ENV=/dev/null \
+  TEXTFILE_DIR="${metricdir}" \
+  bash "${ROOT}/scripts/monitoring-docker-user.sh"
+apply_rc=$?
+set -e
+[[ "${apply_rc}" -ne 0 ]]
+expect_line "${metricdir}/docker_user.prom" 'monitoring_docker_user_applied{family="ipv4"} 0'
 set +e
 MONITORING_DOCKER_USER_ENV=/dev/null MONITORING_ALLOW_CIDRS='127.0.0.0/8;rm -rf' \
   bash "${ROOT}/scripts/monitoring-docker-user.sh" --dry-run

@@ -13,6 +13,7 @@
 | node_exporter | С хоста видны ФС `ext4` на `/` и `/var/lib/docker`. Служебный FUSE в выгрузку не попал после исключения `fuse.*` |
 | `for:` живых алертов | Не ждал 5–15 минут, пока `example.invalid` перейдёт из pending в firing. Условие `probe_success == 0` уже есть, порог по времени покрыт `promtool test rules` |
 | DOCKER-USER на живом хосте | Проверял отдельно. `--dport 18443 -j DROP` в `DOCKER-USER` не остановил `curl` с другого контейнера (ответ 200). Правило с `--ctorigdstport` на этой ВМ тоже набрало 0 пакетов: одновременно живут iptables-legacy и nft, а порт слушает `docker-proxy`. Поэтому в скрипте оба пути, но таймаут «снаружи allow-CIDR» здесь не доказан |
+| Digest grafana, node-exporter, nginx | Сверены с Docker Hub: тег `13.3.0` → `sha256:488984b7…`, `v1.12.1` → `sha256:1b4e4438…`, `1.29.8-alpine` → `sha256:0c79d56a…`. Совпадают с `compose.yaml` |
 | `ansible-playbook` без `--syntax-check` | Не запускался на сервере. Поведение `getent` с `failed_when: false` проверено отдельным мини-плейбуком: отсутствующий пользователь даёт `succeeded=True`, поэтому роль больше не смотрит на `is failed` |
 | `ansible-playbook` без `--syntax-check` | Не запускался. Секреты на сервер не выписывались, systemd-таймеры не ставились |
 | journald / настоящий restic | Не проверялись. Фикстуры JSON и `auth.log` — да |

@@ -153,9 +153,23 @@ if not data:
     sys.exit(2)
 
 def normalize_time(raw):
-    # Python <= 3.10 принимает не больше 6 знаков дробной части.
+    # До Python 3.11 fromisoformat принимает только 3 или 6 знаков
+    # дробной части. Go/restic отбрасывает хвостовые нули, поэтому
+    # бывает 1, 2, 4 или 5 знаков. Приводим к 6.
     text = str(raw).replace("Z", "+00:00")
-    return re.sub(r"(\.\d{6})\d+", r"\1", text)
+    match = re.fullmatch(
+        r"(?P<head>\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})"
+        r"(?:\.(?P<frac>\d+))?"
+        r"(?P<tz>[+-]\d{2}:\d{2})",
+        text,
+    )
+    if not match:
+        return text
+    frac = match.group("frac")
+    if frac is None:
+        return f"{match.group('head')}{match.group('tz')}"
+    frac = (frac + "000000")[:6]
+    return f"{match.group('head')}.{frac}{match.group('tz')}"
 
 def stamp_of(item):
     return datetime.fromisoformat(normalize_time(item["time"]))

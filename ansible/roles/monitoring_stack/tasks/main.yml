@@ -19,27 +19,14 @@
     - path: "{{ monitoring_install_root }}/docker/secrets/tls"
       mode: "0750"
       group: "{{ monitoring_proxy_gid }}"
+    - path: "{{ monitoring_install_root }}/docker/secrets/proxy"
+      mode: "0750"
+      group: "{{ monitoring_proxy_gid }}"
   loop_control:
     label: "{{ item.path }}"
 
 - name: Скопировать неизменяемые каталоги стека
-  ansible.builtin.copy:
-    src: "{{ playbook_dir }}/../{{ item.src }}"
-    dest: "{{ monitoring_install_root }}/{{ item.dest }}"
-    owner: root
-    group: root
-    mode: preserve
-  loop:
-    - src: monitoring/prometheus/rules
-      dest: monitoring/prometheus/rules
-    - src: monitoring/grafana
-      dest: monitoring/grafana
-    - src: monitoring/blackbox
-      dest: monitoring/blackbox
-    - src: monitoring/nginx
-      dest: monitoring/nginx
-  loop_control:
-    label: "{{ item.dest }}"
+  ansible.builtin.import_tasks: layout_copy.yml
   notify: Перечитать конфигурацию стека
 
 - name: Скопировать compose-файл
@@ -266,7 +253,7 @@
 
     - name: Записать htpasswd
       ansible.builtin.copy:
-        dest: "{{ monitoring_install_root }}/docker/secrets/htpasswd"
+        dest: "{{ monitoring_install_root }}/docker/secrets/proxy/htpasswd"
         content: "monitoring:{{ monitoring_stack_htpasswd_hash.stdout }}\n"
         owner: root
         group: "{{ monitoring_proxy_gid }}"

@@ -22,6 +22,7 @@ bash tests/repo_conventions.sh
 echo "== textfile и bootstrap =="
 bash tests/textfile_scripts.sh
 bash tests/bootstrap_secrets.sh
+bash tests/ansible_copy_layout.sh
 
 echo "== yamllint =="
 yamllint .

@@ -14,9 +14,10 @@
 # контейнера на чужой :8443 и не режет транзит. 0.0.0.0 запрещён: у него нет
 # одного исходного адреса назначения, и DROP совпал бы с чужими портами.
 #
-# Каждый запуск удаляет свои правила (комментарий mon-*) и ставит актуальный
-# список. Убранный CIDR не остаётся. Между удалением и вставкой — короткое окно.
-# --dry-run только печатает план.
+# Цепочки MONITORING-PROXY-* пересобираются через iptables-restore --noflush:
+# коммит атомарный, фильтра на это время не пропадает. Прыжок в DOCKER-USER
+# и INPUT ставится после коммита. Старые правила mon-* в этих цепочках
+# снимаются только потом. --dry-run только печатает план.
 set -Eeuo pipefail
 
 ENV_FILE="${MONITORING_DOCKER_USER_ENV:-/etc/monitoring/docker-user.env}"
@@ -118,74 +119,108 @@ cid_tag() {
   printf '%s' "${1//\//_}"
 }
 
-# Печатает команды вставки. Сначала DROP, потом ALLOW: каждый -I 1
-# кладётся в начало, поэтому в цепочке ALLOW оказывается выше DROP.
-plan_family() {
-  local bin="$1"
+# Сначала ALLOW, потом DROP: в одной цепочке порядок -A и есть порядок матча.
+append_rules() {
+  local chain="$1"
   local bind="$2"
   local cidrs="$3"
+  local kind="$4"
   local port cidr tag
-  for port in ${PORTS}; do
-    printf '%s -I DOCKER-USER 1 -p tcp -m conntrack --ctdir ORIGINAL --ctorigdst %s --ctorigdstport %s -m comment --comment mon-drop-%s -j DROP\n' \
-      "${bin}" "${bind}" "${port}" "${port}"
-    printf '%s -I INPUT 1 -p tcp -d %s -m conntrack --ctstate NEW --dport %s -m comment --comment mon-in-drop-%s -j DROP\n' \
-      "${bin}" "${bind}" "${port}" "${port}"
-  done
   for port in ${PORTS}; do
     for cidr in ${cidrs}; do
       tag="$(cid_tag "${cidr}")"
-      printf '%s -I DOCKER-USER 1 -p tcp -s %s -m conntrack --ctdir ORIGINAL --ctorigdst %s --ctorigdstport %s -m comment --comment mon-allow-%s-%s -j RETURN\n' \
-        "${bin}" "${cidr}" "${bind}" "${port}" "${port}" "${tag}"
-      printf '%s -I INPUT 1 -p tcp -d %s -s %s -m conntrack --ctstate NEW --dport %s -m comment --comment mon-in-allow-%s-%s -j ACCEPT\n' \
-        "${bin}" "${bind}" "${cidr}" "${port}" "${port}" "${tag}"
+      if [[ "${kind}" == "fwd" ]]; then
+        printf -- '-A %s -p tcp -s %s -m conntrack --ctdir ORIGINAL --ctorigdst %s --ctorigdstport %s -m comment --comment mon-allow-%s-%s -j RETURN\n' \
+          "${chain}" "${cidr}" "${bind}" "${port}" "${port}" "${tag}"
+      else
+        printf -- '-A %s -p tcp -d %s -s %s -m conntrack --ctstate NEW --dport %s -m comment --comment mon-in-allow-%s-%s -j ACCEPT\n' \
+          "${chain}" "${bind}" "${cidr}" "${port}" "${port}" "${tag}"
+      fi
     done
   done
+  for port in ${PORTS}; do
+    if [[ "${kind}" == "fwd" ]]; then
+      printf -- '-A %s -p tcp -m conntrack --ctdir ORIGINAL --ctorigdst %s --ctorigdstport %s -m comment --comment mon-drop-%s -j DROP\n' \
+        "${chain}" "${bind}" "${port}" "${port}"
+    else
+      printf -- '-A %s -p tcp -d %s -m conntrack --ctstate NEW --dport %s -m comment --comment mon-in-drop-%s -j DROP\n' \
+        "${chain}" "${bind}" "${port}" "${port}"
+    fi
+  done
+}
+
+restore_text() {
+  local bind="$1"
+  local cidrs="$2"
+  printf '%s\n' '*filter'
+  printf '%s\n' ':MONITORING-PROXY-FWD - [0:0]'
+  printf '%s\n' ':MONITORING-PROXY-IN - [0:0]'
+  printf '%s\n' '-F MONITORING-PROXY-FWD'
+  printf '%s\n' '-F MONITORING-PROXY-IN'
+  append_rules MONITORING-PROXY-FWD "${bind}" "${cidrs}" fwd
+  printf '%s\n' '-A MONITORING-PROXY-FWD -j RETURN'
+  append_rules MONITORING-PROXY-IN "${bind}" "${cidrs}" in
+  printf '%s\n' '-A MONITORING-PROXY-IN -j RETURN'
+  printf '%s\n' 'COMMIT'
+}
+
+# iptables-restore коммитит таблицу целиком: пакет видит либо старую цепочку,
+# либо новую, без окна, в котором фильтр снят. Прыжок в DOCKER-USER/INPUT
+# ставится только после успешного коммита.
+apply_family() {
+  local bin="$1"
+  local bind="$2"
+  local cidrs="$3"
+  local restore="${bin}-restore"
+  if ! command -v "${bin}" >/dev/null 2>&1 || ! command -v "${restore}" >/dev/null 2>&1; then
+    echo "[WARN] ${bin} не найден, семейство пропущено" >&2
+    return 1
+  fi
+  if ! "${bin}" -nL DOCKER-USER >/dev/null 2>&1; then
+    echo "[ERROR] цепочка DOCKER-USER отсутствует (${bin})" >&2
+    return 1
+  fi
+  restore_text "${bind}" "${cidrs}" | "${restore}" --noflush || return 1
+  "${bin}" -C DOCKER-USER -j MONITORING-PROXY-FWD >/dev/null 2>&1 \
+    || "${bin}" -I DOCKER-USER 1 -j MONITORING-PROXY-FWD \
+    || return 1
+  "${bin}" -C INPUT -j MONITORING-PROXY-IN >/dev/null 2>&1 \
+    || "${bin}" -I INPUT 1 -j MONITORING-PROXY-IN \
+    || return 1
+  delete_legacy_rules "${bin}" || return 1
+  return 0
+}
+
+# Старые правила mon-* лежали прямо в DOCKER-USER и INPUT. Снимаем их
+# только после того, как новая цепочка уже в пути пакета.
+delete_legacy_rules() {
+  local cmd="$1"
+  local chain numbers number
+  for chain in DOCKER-USER INPUT; do
+    if ! "${cmd}" -nL "${chain}" >/dev/null 2>&1; then
+      continue
+    fi
+    numbers="$("${cmd}" -L "${chain}" --line-numbers -n | awk '/\/\* mon-/ { print $1 }' | sort -nr)"
+    for number in ${numbers}; do
+      "${cmd}" -D "${chain}" "${number}" || return 1
+    done
+  done
+  return 0
 }
 
 if [[ "${DRY_RUN}" -eq 1 ]]; then
-  plan_family iptables "${BIND_IP}" "${ALLOW_CIDRS}"
-  plan_family ip6tables "${BIND_IP_V6}" "${ALLOW_CIDRS_V6}"
+  printf '%s\n' 'iptables-restore --noflush <<EOF'
+  restore_text "${BIND_IP}" "${ALLOW_CIDRS}"
+  printf '%s\n' 'EOF'
+  printf '%s\n' 'iptables -C DOCKER-USER -j MONITORING-PROXY-FWD || iptables -I DOCKER-USER 1 -j MONITORING-PROXY-FWD'
+  printf '%s\n' 'iptables -C INPUT -j MONITORING-PROXY-IN || iptables -I INPUT 1 -j MONITORING-PROXY-IN'
+  printf '%s\n' 'ip6tables-restore --noflush <<EOF'
+  restore_text "${BIND_IP_V6}" "${ALLOW_CIDRS_V6}"
+  printf '%s\n' 'EOF'
+  printf '%s\n' 'ip6tables -C DOCKER-USER -j MONITORING-PROXY-FWD || ip6tables -I DOCKER-USER 1 -j MONITORING-PROXY-FWD'
+  printf '%s\n' 'ip6tables -C INPUT -j MONITORING-PROXY-IN || ip6tables -I INPUT 1 -j MONITORING-PROXY-IN'
   exit 0
 fi
-
-if ! command -v iptables >/dev/null 2>&1; then
-  fail 1 "iptables не найден"
-fi
-
-delete_our_rules() {
-  local cmd="$1"
-  local chain="$2"
-  local numbers number
-  if ! "${cmd}" -nL "${chain}" >/dev/null 2>&1; then
-    return 0
-  fi
-  numbers="$("${cmd}" -L "${chain}" --line-numbers -n | awk '/\/\* mon-/ { print $1 }' | sort -nr)"
-  for number in ${numbers}; do
-    "${cmd}" -D "${chain}" "${number}"
-  done
-}
-
-apply_family() {
-  local cmd="$1"
-  local bind="$2"
-  local cidrs="$3"
-  local line
-  if ! command -v "${cmd}" >/dev/null 2>&1; then
-    echo "[WARN] ${cmd} не найден, семейство пропущено" >&2
-    return 1
-  fi
-  if ! "${cmd}" -nL DOCKER-USER >/dev/null 2>&1; then
-    echo "[ERROR] цепочка DOCKER-USER отсутствует (${cmd})" >&2
-    return 1
-  fi
-  delete_our_rules "${cmd}" DOCKER-USER
-  delete_our_rules "${cmd}" INPUT
-  while IFS= read -r line; do
-    [[ -n "${line}" ]] || continue
-    # shellcheck disable=SC2086
-    ${line}
-  done < <(plan_family "${cmd}" "${bind}" "${cidrs}")
-}
 
 if apply_family iptables "${BIND_IP}" "${ALLOW_CIDRS}"; then
   APPLIED_V4=1

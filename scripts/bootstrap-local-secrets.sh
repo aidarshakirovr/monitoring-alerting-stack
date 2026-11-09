@@ -26,7 +26,7 @@ if [[ "${FORCE}" -eq 0 && -f "${DEST}/compose.env" ]]; then
 fi
 
 umask 077
-mkdir -p "${DEST}/tls"
+mkdir -p "${DEST}/tls" "${DEST}/proxy"
 
 grafana_password="$(openssl rand -base64 24 | tr -d '\n')"
 nginx_password="$(openssl rand -base64 24 | tr -d '\n')"
@@ -36,12 +36,12 @@ htpasswd_hash="$(printf '%s' "${nginx_password}" | openssl passwd -6 -salt "${sa
 printf '%s\n' "${grafana_password}" > "${DEST}/grafana_admin_password"
 printf '%s\n' "${nginx_password}" > "${DEST}/nginx_basic_auth_password"
 printf '%s\n' "${salt}" > "${DEST}/htpasswd.salt"
-printf 'monitoring:%s\n' "${htpasswd_hash}" > "${DEST}/htpasswd"
+printf 'monitoring:%s\n' "${htpasswd_hash}" > "${DEST}/proxy/htpasswd"
 chmod 0600 \
   "${DEST}/grafana_admin_password" \
   "${DEST}/nginx_basic_auth_password" \
   "${DEST}/htpasswd.salt" \
-  "${DEST}/htpasswd"
+  "${DEST}/proxy/htpasswd"
 
 openssl req -x509 -nodes -newkey ec \
   -pkeyopt ec_paramgen_curve:prime256v1 \

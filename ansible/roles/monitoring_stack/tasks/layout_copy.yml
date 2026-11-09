@@ -1,0 +1,17 @@
+---
+- name: Скопировать неизменяемые каталоги стека
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../{{ item.src }}/"
+    dest: "{{ monitoring_install_root }}/{{ item.dest }}"
+    mode: preserve
+  loop:
+    - src: monitoring/prometheus/rules
+      dest: monitoring/prometheus/rules
+    - src: monitoring/grafana
+      dest: monitoring/grafana
+    - src: monitoring/blackbox
+      dest: monitoring/blackbox
+    - src: monitoring/nginx
+      dest: monitoring/nginx
+  loop_control:
+    label: "{{ item.dest }}"

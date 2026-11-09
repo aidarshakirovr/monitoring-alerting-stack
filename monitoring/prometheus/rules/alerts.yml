@@ -276,6 +276,17 @@ groups:
 
   - name: firewall
     rules:
+      - alert: MonitoringDockerUserMetricsAbsent
+        expr: absent(monitoring_docker_user_applied{family="ipv4"})
+        for: 30m
+        labels:
+          severity: critical
+          component: firewall
+        annotations:
+          summary: "Метрики правил DOCKER-USER нет дольше 30 минут"
+          description: "Файл docker_user.prom ни разу не появился или node_exporter его не отдал. Пока ряда нет, отказ скрипта не виден как applied=0."
+          runbook: "docs/RUNBOOK.md#monitoringdockerusermetricsabsent"
+
       - alert: MonitoringDockerUserNotApplied
         expr: monitoring_docker_user_applied{family="ipv4"} == 0
         for: 10m

@@ -224,7 +224,8 @@ services:
       - "${MONITORING_BIND_IP:-127.0.0.1}:${MONITORING_ALERTMANAGER_PORT:-8445}:8082"
     volumes:
       - ../monitoring/nginx:/etc/monitoring-nginx:ro
-      - ./secrets:/etc/nginx/secrets:ro
+      - ./secrets/tls:/etc/nginx/secrets/tls:ro
+      - ./secrets/proxy:/etc/nginx/secrets/proxy:ro
     # mode=1777: tmpfs создаёт root, а процесс nginx не root и должен сделать mkdir.
     tmpfs:
       - /tmp:mode=1777
